@@ -1,6 +1,7 @@
 import streamlit as st
 import time
 import pandas as pd
+import json
 from question_generator import generate_single_question, evaluate_written_answer
 from database import init_local_db, log_score
 
@@ -25,9 +26,23 @@ st.markdown("""
     .keyword-pill-matched { display: inline-block; background-color: #DCFCE7; color: #15803D; font-weight: 600; padding: 3px 10px; border-radius: 12px; font-size: 0.85rem; margin-right: 5px; margin-top: 5px; }
     .keyword-pill-missing { display: inline-block; background-color: #FEE2E2; color: #B91C1C; font-weight: 600; padding: 3px 10px; border-radius: 12px; font-size: 0.85rem; margin-right: 5px; margin-top: 5px; }
     .timer-badge { background-color: #FEF3C7; color: #92400E; font-weight: bold; padding: 8px 15px; border-radius: 20px; font-size: 1.1rem; border: 1px solid #FCD34D; text-align: center; }
+    .timer-badge-warning { background-color: #FEE2E2; color: #991B1B; font-weight: bold; padding: 8px 15px; border-radius: 20px; font-size: 1.1rem; border: 2px solid #EF4444; text-align: center; animation: pulse 1s infinite; }
     .ai-badge { background-color: #F3E8FF; color: #6B21A8; font-weight: bold; padding: 4px 10px; border-radius: 10px; font-size: 0.85rem; }
+    
+    @keyframes pulse {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.05); }
+        100% { transform: scale(1); }
+    }
 </style>
 """, unsafe_allow_html=True)
+
+# 10-Second Countdown Audio HTML Element (Beep sound)
+COUNTDOWN_AUDIO_HTML = """
+<audio autoplay>
+  <source src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" type="audio/mpeg">
+</audio>
+"""
 
 # 21-Chapter Syllabus Index
 CAMBRIDGE_SYLLABUS = [
@@ -54,9 +69,11 @@ CAMBRIDGE_SYLLABUS = [
     "21. Human Influences on Ecosystems (Deforestation, Pollution, Conservation)"
 ]
 
-# State
+# State Management
 if "student_name" not in st.session_state:
     st.session_state.student_name = "Omar Mohamed"
+if "student_email" not in st.session_state:
+    st.session_state.student_email = ""
 if "drill_active" not in st.session_state:
     st.session_state.drill_active = False
 if "current_question" not in st.session_state:
@@ -71,6 +88,10 @@ if "written_eval" not in st.session_state:
     st.session_state.written_eval = None
 if "question_start_time" not in st.session_state:
     st.session_state.question_start_time = None
+if "session_logs" not in st.session_state:
+    st.session_state.session_logs = []
+if "show_summary" not in st.session_state:
+    st.session_state.show_summary = False
 
 st.sidebar.title("🧬 BioMastery IGCSE")
 st.sidebar.caption("AI Cambridge Diagnostic Platform")
@@ -78,23 +99,26 @@ st.sidebar.caption("AI Cambridge Diagnostic Platform")
 menu = st.sidebar.radio("Navigation", ["🎯 Infinite Practice Mode", "⚙️ Candidate Profile"])
 
 if menu == "⚙️ Candidate Profile":
-    st.header("⚙️️ Profile Settings")
-    student_input = st.text_input("Active Candidate Name:", value=st.session_state.student_name)
-    if st.button("Save Name"):
+    st.header("⚙️ Candidate Profile Settings")
+    student_input = st.text_input("Candidate Name:", value=st.session_state.student_name)
+    email_input = st.text_input("Candidate Email (for score reports):", value=st.session_state.student_email)
+    if st.button("Save Profile"):
         st.session_state.student_name = student_input
+        st.session_state.student_email = email_input
         st.success("Profile saved!")
 
 elif menu == "🎯 Infinite Practice Mode":
     st.markdown('<div class="main-header">Infinite AI Diagnostic Drill</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="sub-header">Candidate: <b>{st.session_state.student_name}</b> | Paper 2 (MCQ) vs Paper 4/6 (Written) Engine</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sub-header">Candidate: <b>{st.session_state.student_name}</b> | Interactive Diagnostic Session</div>', unsafe_allow_html=True)
 
     keys_pool = st.secrets.get("GEMINI_API_KEYS", st.secrets.get("GEMINI_API_KEY", ""))
 
-    if not st.session_state.drill_active:
-        st.subheader("🛠 Configure Exam Drill")
+    if not st.session_state.drill_active and not st.session_state.show_summary:
+        st.subheader("🛠 Configure Exam Session")
         c1, c2 = st.columns(2)
         with c1:
             selected_paper = st.selectbox("Select Paper Focus:", ["Paper 2 (Multiple Choice)", "Paper 4 (Theory & Data Analysis)", "Paper 6 (Alternative to Practical)"])
+            student_email = st.text_input("Enter your Gmail address for full report:", value=st.session_state.student_email, placeholder="student@gmail.com")
         with c2:
             selected_topic = st.selectbox("Select Cambridge Chapter:", CAMBRIDGE_SYLLABUS)
 
@@ -104,17 +128,71 @@ elif menu == "🎯 Infinite Practice Mode":
             else:
                 st.session_state.selected_paper = selected_paper
                 st.session_state.selected_topic = selected_topic
+                st.session_state.student_email = student_email
                 st.session_state.drill_active = True
                 st.session_state.question_count = 0
                 st.session_state.correct_count = 0
                 st.session_state.current_question = None
                 st.session_state.show_feedback = False
                 st.session_state.written_eval = None
+                st.session_state.session_logs = []
+                st.session_state.show_summary = False
                 st.rerun()
 
+    elif st.session_state.show_summary:
+        # POST-DRILL SUMMARY & REPORT VIEW
+        st.balloons()
+        st.header("📊 Diagnostic Performance Report")
+        
+        total_q = st.session_state.question_count
+        corr_q = st.session_state.correct_count
+        pct = round((corr_q / total_q) * 100, 1) if total_q > 0 else 0.0
+
+        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1.metric("Final Score", f"{corr_q} / {total_q}")
+        col_m2.metric("Accuracy Percentage", f"{pct}%")
+        col_m3.metric("Chapter Focus", st.session_state.selected_topic.split('.')[0])
+
+        st.divider()
+        
+        # Analyze Strong and Weak Points
+        matched_kw_set = set()
+        missing_kw_set = set()
+        
+        for log in st.session_state.session_logs:
+            matched_kw_set.update(log.get("matched_keywords", []))
+            missing_kw_set.update(log.get("missing_keywords", []))
+
+        col_s1, col_s2 = st.columns(2)
+        with col_s1:
+            st.subheader("🟢 Strong Points & Mastered Terms")
+            if matched_kw_set:
+                for kw in matched_kw_set:
+                    st.markdown(f"- ✅ `{kw}`")
+            else:
+                st.info("Keep practicing to build your keyword bank!")
+
+        with col_s2:
+            st.subheader("🔴 Areas for Improvement (Examiner Traps)")
+            if missing_kw_set:
+                for kw in missing_kw_set:
+                    st.markdown(f"- ⚠️ `{kw}` (Required for full marks)")
+            else:
+                st.success("Excellent precision! No missing keywords identified.")
+
+        if st.session_state.student_email:
+            st.success(f"📩 Performance summary ready for **{st.session_state.student_email}**!")
+
+        if st.button("Start New Drill"):
+            st.session_state.drill_active = False
+            st.session_state.show_summary = False
+            st.session_state.current_question = None
+            st.rerun()
+
     else:
+        # ACTIVE QUESTION DISPLAY
         if st.session_state.current_question is None:
-            with st.spinner("🤖 Gemini 3.8-Flash is generating paper-specific question & setting timer..."):
+            with st.spinner("🤖 Gemini 3.8-Flash is generating question & setting timer..."):
                 try:
                     q_data = generate_single_question(keys_pool, st.session_state.selected_paper, st.session_state.selected_topic)
                     st.session_state.current_question = q_data
@@ -132,21 +210,25 @@ elif menu == "🎯 Infinite Practice Mode":
         is_mcq = q.get("question_format") == "MULTIPLE_CHOICE"
         allowed_sec = q.get("allowed_time_seconds", 60)
         elapsed_sec = int(time.time() - st.session_state.question_start_time)
-        remaining_sec = allowed_sec - elapsed_sec
+        remaining_sec = max(0, allowed_sec - elapsed_sec)
+
+        # Trigger audio and visual warning when remaining time <= 10 seconds
+        if 0 < remaining_sec <= 10 and not st.session_state.show_feedback:
+            st.components.v1.html(COUNTDOWN_AUDIO_HTML, height=0)
 
         s1, s2, s3, s4 = st.columns([1.5, 1, 1, 1])
         s1.markdown(f"**Format:** `{'Paper 2 MCQ' if is_mcq else 'Written Response'}` | **Q#{st.session_state.question_count + 1}**")
         s2.markdown(f"**Score:** `{st.session_state.correct_count}/{st.session_state.question_count}`")
         s3.markdown(f'<span class="ai-badge">AI Timer: {allowed_sec}s</span>', unsafe_allow_html=True)
         
-        if remaining_sec > 0:
+        if remaining_sec > 10:
             s4.markdown(f'<div class="timer-badge">⏱ {remaining_sec}s</div>', unsafe_allow_html=True)
         else:
-            s4.markdown('<div class="timer-badge" style="background-color:#FEE2E2; color:#991B1B;">⏰ Time Expired</div>', unsafe_allow_html=True)
+            s4.markdown(f'<div class="timer-badge-warning">⚠️ {remaining_sec}s</div>', unsafe_allow_html=True)
 
         st.write("")
 
-        # Question Display
+        # Question Presentation
         st.markdown(f"""
         <div class="question-box">
             <span style="color:#0284C7; font-weight:bold; font-size:0.9rem;">[{q.get('syllabus_code', '0610')}] — {q.get('command_word', 'Question')}</span>
@@ -154,7 +236,6 @@ elif menu == "🎯 Infinite Practice Mode":
         </div>
         """, unsafe_allow_html=True)
 
-        # PAPER 2: MULTIPLE CHOICE INTERFACE
         if is_mcq:
             selected_option = st.radio(
                 "Select your option:",
@@ -164,14 +245,30 @@ elif menu == "🎯 Infinite Practice Mode":
             )
 
             if not st.session_state.show_feedback:
-                if st.button("Submit MCQ Answer", type="primary"):
-                    st.session_state.show_feedback = True
-                    is_corr = q["options"].index(selected_option) == q["correct_index"]
-                    st.session_state.question_count += 1
-                    if is_corr:
-                        st.session_state.correct_count += 1
-                    log_score(st.session_state.student_name, st.session_state.selected_topic, st.session_state.correct_count, st.session_state.question_count)
-                    st.rerun()
+                c_btn1, c_btn2 = st.columns([2, 1])
+                with c_btn1:
+                    if st.button("Submit MCQ Answer", type="primary"):
+                        st.session_state.show_feedback = True
+                        is_corr = q["options"].index(selected_option) == q["correct_index"]
+                        st.session_state.question_count += 1
+                        if is_corr:
+                            st.session_state.correct_count += 1
+                        
+                        st.session_state.session_logs.append({
+                            "question": q['question'],
+                            "is_correct": is_corr,
+                            "matched_keywords": q.get("keywords", []) if is_corr else [],
+                            "missing_keywords": [] if is_corr else q.get("keywords", [])
+                        })
+                        
+                        log_score(st.session_state.student_name, st.session_state.selected_topic, st.session_state.correct_count, st.session_state.question_count)
+                        st.rerun()
+
+                with c_btn2:
+                    if st.button("🏁 End Session & Summary"):
+                        st.session_state.drill_active = False
+                        st.session_state.show_summary = True
+                        st.rerun()
 
             else:
                 is_corr = q["options"].index(selected_option) == q["correct_index"]
@@ -180,7 +277,6 @@ elif menu == "🎯 Infinite Practice Mode":
                 else:
                     st.markdown(f'<div class="examiner-box-error"><h4>❌ Incorrect Option</h4><p><b>Correct Answer:</b> {q["options"][q["correct_index"]]}</p><p>{q["examiner_note"]}</p></div>', unsafe_allow_html=True)
 
-        # PAPER 4 & PAPER 6: WRITTEN RESPONSE INTERFACE
         else:
             user_text_response = st.text_area(
                 "Write your answer below (use precise Cambridge scientific terminology):",
@@ -190,19 +286,36 @@ elif menu == "🎯 Infinite Practice Mode":
             )
 
             if not st.session_state.show_feedback:
-                if st.button("Submit Written Answer for AI Examiner Review", type="primary"):
-                    if not user_text_response.strip():
-                        st.warning("Please type your response before submitting!")
-                    else:
-                        with st.spinner("🤖 Senior Examiner evaluating response against Mark Scheme keywords..."):
-                            eval_result = evaluate_written_answer(keys_pool, q, user_text_response)
-                            st.session_state.written_eval = eval_result
-                            st.session_state.show_feedback = True
-                            st.session_state.question_count += 1
-                            if eval_result.get("score_awarded", 0) > 0:
-                                st.session_state.correct_count += 1
-                            log_score(st.session_state.student_name, st.session_state.selected_topic, st.session_state.correct_count, st.session_state.question_count)
-                            st.rerun()
+                c_btn1, c_btn2 = st.columns([2, 1])
+                with c_btn1:
+                    if st.button("Submit Written Answer for AI Examiner Review", type="primary"):
+                        if not user_text_response.strip():
+                            st.warning("Please type your response before submitting!")
+                        else:
+                            with st.spinner("🤖 Senior Examiner evaluating response against Mark Scheme keywords..."):
+                                eval_result = evaluate_written_answer(keys_pool, q, user_text_response)
+                                st.session_state.written_eval = eval_result
+                                st.session_state.show_feedback = True
+                                st.session_state.question_count += 1
+                                is_corr = eval_result.get("score_awarded", 0) > 0
+                                if is_corr:
+                                    st.session_state.correct_count += 1
+                                
+                                st.session_state.session_logs.append({
+                                    "question": q['question'],
+                                    "is_correct": is_corr,
+                                    "matched_keywords": eval_result.get("matched_keywords", []),
+                                    "missing_keywords": eval_result.get("missing_keywords", [])
+                                })
+                                
+                                log_score(st.session_state.student_name, st.session_state.selected_topic, st.session_state.correct_count, st.session_state.question_count)
+                                st.rerun()
+
+                with c_btn2:
+                    if st.button("🏁 End Session & Summary"):
+                        st.session_state.drill_active = False
+                        st.session_state.show_summary = True
+                        st.rerun()
 
             else:
                 eval_res = st.session_state.written_eval or {}
@@ -215,7 +328,6 @@ elif menu == "🎯 Infinite Practice Mode":
 
                 st.markdown(f"**Ideal Cambridge Model Answer:**\n> {q.get('model_answer', 'N/A')}")
                 
-                # Show Keyword Matches
                 matched = eval_res.get("matched_keywords", [])
                 missing = eval_res.get("missing_keywords", [])
                 
@@ -224,7 +336,6 @@ elif menu == "🎯 Infinite Practice Mode":
                 html_kw += "".join([f'<span class="keyword-pill-missing">✗ {kw}</span>' for kw in missing])
                 st.markdown(html_kw, unsafe_allow_html=True)
 
-        # NEXT / END CONTROLS
         if st.session_state.show_feedback:
             st.write("")
             b1, b2 = st.columns([2, 1])
@@ -235,7 +346,7 @@ elif menu == "🎯 Infinite Practice Mode":
                     st.session_state.written_eval = None
                     st.rerun()
             with b2:
-                if st.button("🏁 End Session"):
+                if st.button("🏁 End Session & View Report"):
                     st.session_state.drill_active = False
-                    st.session_state.current_question = None
+                    st.session_state.show_summary = True
                     st.rerun()
