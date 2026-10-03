@@ -1,11 +1,8 @@
 import json
 import random
+import re
 
 def get_high_yield_question(paper_focus, topic, seen_ids=None):
-    """
-    Fetches a non-repeating question based on paper and topic.
-    Ensures questions never repeat within the same session.
-    """
     if seen_ids is None:
         seen_ids = []
 
@@ -13,89 +10,84 @@ def get_high_yield_question(paper_focus, topic, seen_ids=None):
         with open("questions_bank.json", "r") as f:
             bank = json.load(f)
 
-        # 1. Exact match on paper, topic, and unseen ID
-        filtered = [
-            q for q in bank 
-            if q.get("paper") == paper_focus 
-            and q.get("topic") == topic 
-            and q.get("id") not in seen_ids
-        ]
-
-        # 2. Fallback: Any unseen question in the same paper
+        # Strict filtering
+        filtered = [q for q in bank if q.get("paper") == paper_focus and q.get("topic") == topic and q.get("id") not in seen_ids]
+        
         if not filtered:
-            filtered = [
-                q for q in bank 
-                if q.get("paper") == paper_focus 
-                and q.get("id") not in seen_ids
-            ]
-
-        # 3. Fallback: If all questions in paper were seen, reset pool for paper
+            filtered = [q for q in bank if q.get("paper") == paper_focus and q.get("id") not in seen_ids]
+            
         if not filtered:
             filtered = [q for q in bank if q.get("paper") == paper_focus]
 
-        # 4. Global fallback
-        if not filtered:
-            filtered = bank
-
-        return random.choice(filtered)
-
+        if filtered:
+            return random.choice(filtered)
+            
     except Exception:
-        # Dynamic fallback item if JSON is unreadable or empty
-        fallback_id = f"FALLBACK_{random.randint(1000, 9999)}"
+        pass # Proceed to strict fallback if file is missing/empty
+
+    # STRICT FALLBACK: Ensure P2 is ALWAYS Multiple Choice
+    is_p2 = "Paper 2" in paper_focus
+    mock_id = f"{'P2' if is_p2 else 'P4'}_{random.randint(1000, 9999)}"
+    
+    if is_p2:
         return {
-            "id": fallback_id,
+            "id": mock_id,
             "paper": paper_focus,
             "topic": topic,
-            "question": f"Explain the key biological adaptation related to {topic}.",
+            "question": f"Which statement correctly describes a process in {topic}?",
+            "options": [
+                "A physically incorrect distractor.",
+                "The correct Cambridge-verified statement.",
+                "A common student misconception.",
+                "Another closely related but incorrect fact."
+            ],
+            "correct_index": 1,
+            "examiner_note": "This option is correct because it aligns with the 0610 syllabus definition.",
+            "allowed_time_seconds": 45
+        }
+    else:
+        return {
+            "id": mock_id,
+            "paper": paper_focus,
+            "topic": topic,
+            "question": f"Describe the biological principles underlying {topic}. [3]",
             "marks": 3,
-            "model_answer": "High concentration of active components working down or against gradient.",
-            "keywords": ["concentration", "gradient", "active"],
-            "reject_terms": [],
-            "allowed_time_seconds": 60
+            "model_answer": "Point 1 relating to structure. Point 2 relating to function. Point 3 relating to overall mechanism.",
+            "keywords": ["structure", "function", "mechanism"],
+            "reject_terms": ["magic", "grows"],
+            "allowed_time_seconds": 180
         }
 
-
 def evaluate_written_answer_fast(question_data, student_answer):
-    """
-    Evaluates student written answers instantly in Python (<10ms).
-    Prevents API delays and evaluates against required keywords and rejected terms.
-    """
     text = student_answer.lower().strip()
     keywords = question_data.get("keywords", [])
     reject_terms = question_data.get("reject_terms", [])
 
-    # Check for explicitly rejected/forbidden phrasing first
+    # 1. Check Rejects
     for reject in reject_terms:
-        if reject.lower() in text:
+        if re.search(r'\b' + re.escape(reject.lower()) + r'\b', text):
             return {
                 "score_awarded": 0,
                 "matched_keywords": [],
                 "missing_keywords": keywords,
-                "examiner_feedback": f"❌ Marked 0 due to forbidden term/phrasing: '{reject}'. Cambridge mark scheme strictly rejects this term."
+                "examiner_feedback": f"❌ Marked 0 due to forbidden term: '{reject}'."
             }
 
-    matched = []
-    missing = []
-
+    # 2. Check Keywords using word boundaries
+    matched, missing = [], []
     for kw in keywords:
-        if kw.lower() in text:
+        if re.search(r'\b' + re.escape(kw.lower()) + r'\b', text) or kw.lower() in text:
             matched.append(kw)
         else:
             missing.append(kw)
 
     max_marks = question_data.get("marks", len(keywords))
-    if len(keywords) > 0:
-        score = round((len(matched) / len(keywords)) * max_marks)
-    else:
-        score = max_marks if len(text) > 5 else 0
+    score = round((len(matched) / len(keywords)) * max_marks) if keywords else (max_marks if len(text) > 10 else 0)
 
-    if score > 0:
-        feedback = f"✅ Matched {len(matched)} of {len(keywords)} essential mark scheme point(s)."
-    else:
-        feedback = "⚠️ Missing key scientific terminology required by the Cambridge mark scheme."
+    feedback = f"✅ Matched {len(matched)} of {len(keywords)} mark scheme point(s)." if score > 0 else "⚠️ Missing key scientific terminology."
 
     return {
-        "score_awarded": score,
+        "score_awarded": min(score, max_marks),
         "matched_keywords": matched,
         "missing_keywords": missing,
         "examiner_feedback": feedback
