@@ -2,4 +2,3 @@ streamlit>=1.30.0
 google-generativeai>=0.3.2
 pandas>=2.0.0
 plotly>=5.18.0
-streamlit-timer>=0.0.4
