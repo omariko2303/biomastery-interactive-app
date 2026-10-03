@@ -2,27 +2,21 @@ import google.generativeai as genai
 import json
 import re
 
-def generate_single_question(api_key, paper_type, topic):
+def generate_single_question(api_keys, paper_type, topic):
     """
-    Generates a single, infinite-mode Cambridge Biology question.
-    Gemini 3.8-Flash dynamically calculates the required time limit based on difficulty.
+    Tries multiple Gemini API keys in sequence until one succeeds.
+    Automatically fails over if a quota (429) or rate limit is reached.
     """
-    if not api_key:
-        raise ValueError("Gemini API Key is missing!")
+    if isinstance(api_keys, str):
+        api_keys = [k.strip() for k in api_keys.split(",") if k.strip()]
 
-    genai.configure(api_key=api_key.strip().strip('"').strip("'"))
-    
-    generation_config = {
-        "temperature": 0.2,
-        "top_p": 0.95
-    }
-    
-    model = genai.GenerativeModel("gemini-3.8-flash", generation_config=generation_config)
+    if not api_keys:
+        raise ValueError("No Gemini API keys provided in Secrets!")
 
     paper_specs = {
         "Paper 2 (Multiple Choice)": "Focus on precise keyword definitions, distractor choice traps, and core biological concepts.",
         "Paper 4 (Theory & Data Analysis)": "Focus on Command Words ('Describe' vs 'Explain'), graph/data interpretation, and compulsory mark scheme keywords.",
-        "Paper 6 (Alternative to Practical)": "Focus on experimental procedures, variables (independent, dependent, controlled), sources of error, drawing rules, and indicator tests (Benedicts, Biuret, Iodine, DCPIP)."
+        "Paper 6 (Alternative to Practical)": "Focus on experimental procedures, variables, drawing rules, and indicator tests (Benedict's, Biuret, Iodine, DCPIP)."
     }
 
     prompt = f"""You are a Senior Cambridge IGCSE / O Level Biology (0610 / 0970) Chief Examiner.
@@ -60,20 +54,36 @@ JSON Schema:
 }}
 """
 
-    response = model.generate_content(prompt)
-    raw_text = response.text.strip()
+    last_exception = None
 
-    if raw_text.startswith("```json"):
-        raw_text = raw_text[7:]
-    if raw_text.startswith("```"):
-        raw_text = raw_text[3:]
-    if raw_text.endswith("```"):
-        raw_text = raw_text[:-3]
+    for index, raw_key in enumerate(api_keys):
+        key = raw_key.strip().strip('"').strip("'")
+        try:
+            genai.configure(api_key=key)
+            model = genai.GenerativeModel(
+                "gemini-3.8-flash", 
+                generation_config={"temperature": 0.1, "top_p": 0.95}
+            )
+            response = model.generate_content(prompt)
+            raw_text = response.text.strip()
 
-    try:
-        return json.loads(raw_text.strip())
-    except Exception as e:
-        json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
-        if json_match:
-            return json.loads(json_match.group(0))
-        raise ValueError(f"Failed to parse question JSON: {e}\nRaw Output: {raw_text}")
+            if raw_text.startswith("```json"):
+                raw_text = raw_text[7:]
+            if raw_text.startswith("```"):
+                raw_text = raw_text[3:]
+            if raw_text.endswith("```"):
+                raw_text = raw_text[:-3]
+
+            try:
+                return json.loads(raw_text.strip())
+            except Exception:
+                json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+                if json_match:
+                    return json.loads(json_match.group(0))
+
+        except Exception as e:
+            last_exception = e
+            print(f"[API Rotation] Key #{index + 1} failed: {e}. Switching to next key...")
+            continue
+
+    raise RuntimeError(f"All API keys exhausted. Last error: {last_exception}")
