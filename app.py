@@ -7,16 +7,42 @@ from database import init_local_db, log_score, get_leaderboard
 st.set_page_config(page_title="BioMastery IGCSE | AI Portal", page_icon="🧬", layout="wide")
 init_local_db()
 
+# FIXED CSS: Explicitly setting 'color' for text to prevent the Dark Mode white-on-white bug
 st.markdown("""
 <style>
     .main-header { font-size: 2.2rem; font-weight: 700; color: #0E7490; }
-    .question-box { background-color: #F8FAFC; border-left: 5px solid #0284C7; padding: 25px; border-radius: 8px; font-size: 1.2rem; margin-bottom: 20px;}
-    .examiner-box-success { background-color: #F0FDF4; border-left: 5px solid #16A34A; padding: 15px; border-radius: 8px; margin-top: 15px; }
-    .examiner-box-error { background-color: #FEF2F2; border-left: 5px solid #DC2626; padding: 15px; border-radius: 8px; margin-top: 15px; }
+    .question-box { background-color: #F8FAFC; color: #0F172A; border-left: 5px solid #0284C7; padding: 25px; border-radius: 8px; font-size: 1.2rem; margin-bottom: 20px;}
+    .examiner-box-success { background-color: #F0FDF4; color: #064E3B; border-left: 5px solid #16A34A; padding: 15px; border-radius: 8px; margin-top: 15px; }
+    .examiner-box-error { background-color: #FEF2F2; color: #7F1D1D; border-left: 5px solid #DC2626; padding: 15px; border-radius: 8px; margin-top: 15px; }
     .keyword-pill-matched { background-color: #DCFCE7; color: #15803D; padding: 4px 12px; border-radius: 12px; font-weight: 600; margin: 4px; display: inline-block; }
     .keyword-pill-missing { background-color: #FEE2E2; color: #B91C1C; padding: 4px 12px; border-radius: 12px; font-weight: 600; margin: 4px; display: inline-block; }
 </style>
 """, unsafe_allow_html=True)
+
+# Full 21 Chapters for O Level Biology
+CAMBRIDGE_SYLLABUS = [
+    "01. Characteristics and Classification of Living Organisms",
+    "02. Organisation of the Organism (Cell Structure)",
+    "03. Movement In and Out of Cells",
+    "04. Biological Molecules",
+    "05. Enzymes",
+    "06. Plant Nutrition",
+    "07. Human Nutrition",
+    "08. Transport in Plants",
+    "09. Transport in Animals",
+    "10. Diseases and Immunity",
+    "11. Gas Exchange in Humans",
+    "12. Respiration",
+    "13. Excretion in Humans",
+    "14. Coordination and Response",
+    "15. Drugs",
+    "16. Reproduction",
+    "17. Inheritance",
+    "18. Variation and Selection",
+    "19. Organisms and Their Environment",
+    "20. Biotechnology and Genetic Modification",
+    "21. Human Influences on Ecosystems"
+]
 
 # State initialization
 for key in ["authenticated", "drill_active", "show_feedback", "show_summary"]:
@@ -58,8 +84,12 @@ if menu == "🏆 Leaderboard":
 elif menu == "🎯 Exam Drill":
     if not st.session_state.drill_active and not st.session_state.show_summary:
         st.subheader("Configure Session")
-        sel_paper = st.selectbox("Paper Focus:", ["Paper 2 (Multiple Choice)", "Paper 4 (Theory & Data Analysis)"])
-        sel_topic = st.selectbox("Chapter:", ["06. Plant Nutrition", "09. Transport in Animals"]) # Add full list here
+        sel_paper = st.selectbox("Paper Focus:", [
+            "Paper 2 (Multiple Choice)", 
+            "Paper 4 (Theory & Data Analysis)",
+            "Paper 6 (Alternative to Practical)"
+        ])
+        sel_topic = st.selectbox("Chapter:", CAMBRIDGE_SYLLABUS)
         if st.button("Start Drill", type="primary"):
             st.session_state.selected_paper = sel_paper
             st.session_state.selected_topic = sel_topic
@@ -79,7 +109,6 @@ elif menu == "🎯 Exam Drill":
             st.rerun()
 
     else:
-        # Load Question cleanly
         if st.session_state.current_question is None:
             q = get_high_yield_question(st.session_state.selected_paper, st.session_state.selected_topic, st.session_state.seen_question_ids)
             st.session_state.current_question = q
@@ -94,7 +123,6 @@ elif menu == "🎯 Exam Drill":
         st.markdown(f"**Q{st.session_state.question_count + 1}** | Score: {st.session_state.correct_count}")
         st.markdown(f'<div class="question-box">{q["question"]}</div>', unsafe_allow_html=True)
 
-        # MCQ RENDER
         if is_mcq:
             sel_opt = st.radio("Select Option:", q["options"], disabled=st.session_state.show_feedback)
             if not st.session_state.show_feedback:
@@ -105,13 +133,12 @@ elif menu == "🎯 Exam Drill":
                     st.rerun()
             else:
                 if st.session_state.is_correct:
-                    st.markdown(f'<div class="examiner-box-success">✅ Correct. Time taken: {int(st.session_state.time_taken)}s<br>{q.get("examiner_note", "")}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="examiner-box-success">✅ Correct. Time taken: {int(st.session_state.time_taken)}s<br><br><b>Examiner Note:</b> {q.get("examiner_note", "")}</div>', unsafe_allow_html=True)
                     if st.session_state.time_taken <= q.get("allowed_time_seconds", 60):
                         st.session_state.correct_count += 1
                 else:
-                    st.markdown(f'<div class="examiner-box-error">❌ Incorrect.<br><b>Correct Answer:</b> {q["options"][q["correct_index"]]}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="examiner-box-error">❌ Incorrect.<br><br><b>Correct Answer:</b> {q["options"][q["correct_index"]]}<br><br><b>Examiner Note:</b> {q.get("examiner_note", "")}</div>', unsafe_allow_html=True)
 
-        # WRITTEN RENDER
         else:
             written_ans = st.text_area("Your Answer:", disabled=st.session_state.show_feedback, height=150)
             if not st.session_state.show_feedback:
@@ -126,11 +153,14 @@ elif menu == "🎯 Exam Drill":
             else:
                 res = st.session_state.eval_result
                 sc = res["score_awarded"]
-                st.markdown(f'<div class="examiner-box-{"success" if sc>0 else "error"}">Marks Awarded: {sc}/{q.get("marks", 3)}<br>{res["examiner_feedback"]}</div>', unsafe_allow_html=True)
+                box_class = "examiner-box-success" if sc > 0 else "examiner-box-error"
                 
-                st.markdown("**Cambridge Model Answer:**")
+                st.markdown(f'<div class="{box_class}"><b>Marks Awarded: {sc}/{q.get("marks", 3)}</b><br><br>{res["examiner_feedback"]}</div>', unsafe_allow_html=True)
+                
+                st.markdown("### Cambridge Model Answer")
                 st.info(q.get("model_answer", ""))
                 
+                st.markdown("### Keyword Checklist")
                 pills = "".join([f'<span class="keyword-pill-matched">✓ {k}</span>' for k in res["matched_keywords"]])
                 pills += "".join([f'<span class="keyword-pill-missing">✗ {k}</span>' for k in res["missing_keywords"]])
                 st.markdown(pills, unsafe_allow_html=True)
@@ -138,8 +168,8 @@ elif menu == "🎯 Exam Drill":
                 if st.session_state.time_taken <= q.get("allowed_time_seconds", 180):
                      st.session_state.correct_count += sc
 
-        # TRANSITION BUTTONS
         if st.session_state.show_feedback:
+            st.write("")
             st.session_state.question_count += 1
             log_score(st.session_state.student_email, st.session_state.student_name, st.session_state.selected_topic, st.session_state.is_correct if is_mcq else sc)
             
