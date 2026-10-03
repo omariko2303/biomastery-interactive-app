@@ -1,24 +1,23 @@
 [
   {
-    "id": "P4_PLANT_01",
-    "paper": "Paper 4 (Theory & Data Analysis)",
-    "topic": "06. Plant Nutrition (Photosynthesis, Leaf Structure, Limiting Factors)",
-    "question": "Explain how the structure of a palisade mesophyll cell is adapted for photosynthesis.",
-    "marks": 3,
-    "model_answer": "Contains a high density of chloroplasts to absorb maximum light energy. Positioned near the top surface of the leaf to intercept light. Cells are vertically column-shaped and tightly packed to maximize light absorption.",
-    "keywords": ["chloroplast", "light", "tightly packed", "top"],
-    "reject_terms": ["chlorophyll absorbs sun"],
-    "allowed_time_seconds": 60
+    "id": "P2_PLANT_01",
+    "paper": "Paper 2 (Multiple Choice)",
+    "topic": "06. Plant Nutrition",
+    "question": "Which layer of the leaf contains the highest concentration of chloroplasts?",
+    "options": ["Spongy mesophyll", "Palisade mesophyll", "Upper epidermis", "Lower epidermis"],
+    "correct_index": 1,
+    "examiner_note": "Palisade mesophyll cells are vertically arranged and packed with chloroplasts to maximize light absorption.",
+    "allowed_time_seconds": 45
   },
   {
-    "id": "P4_PLANT_02",
+    "id": "P4_PLANT_01",
     "paper": "Paper 4 (Theory & Data Analysis)",
-    "topic": "06. Plant Nutrition (Photosynthesis, Leaf Structure, Limiting Factors)",
-    "question": "Describe the effect of temperature on the rate of photosynthesis.",
+    "topic": "06. Plant Nutrition",
+    "question": "Explain how the internal structure of a leaf is adapted for gas exchange. [3]",
     "marks": 3,
-    "model_answer": "As temperature increases up to the optimum, the rate of photosynthesis increases due to higher kinetic energy and collision rate of enzymes. Beyond the optimum temperature, enzymes denature, altering the active site shape and rapidly decreasing the rate.",
-    "keywords": ["kinetic energy", "optimum", "denatur", "active site"],
-    "reject_terms": ["enzymes die", "enzymes destroyed"],
-    "allowed_time_seconds": 60
+    "model_answer": "The spongy mesophyll layer contains air spaces to allow diffusion of gases. Guard cells open and close stomata to regulate gas movement. The thin nature of the leaf provides a short diffusion distance.",
+    "keywords": ["spongy", "air spaces", "diffusion", "stomata"],
+    "reject_terms": ["breathing"],
+    "allowed_time_seconds": 180
   }
 ]
