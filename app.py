@@ -1,13 +1,12 @@
 import streamlit as st
 import time
 import pandas as pd
-import json
 from question_generator import generate_single_question, evaluate_written_answer
-from database import init_local_db, log_score
+from database import init_local_db, log_score, get_leaderboard
 
 # Page Config
 st.set_page_config(
-    page_title="BioMastery IGCSE | AI Engine",
+    page_title="BioMastery IGCSE | AI Portal",
     page_icon="🧬",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -37,14 +36,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 10-Second Countdown Audio HTML Element (Beep sound)
 COUNTDOWN_AUDIO_HTML = """
 <audio autoplay>
   <source src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" type="audio/mpeg">
 </audio>
 """
 
-# 21-Chapter Syllabus Index
 CAMBRIDGE_SYLLABUS = [
     "01. Characteristics and Classification of Living Organisms",
     "02. Organisation of the Organism (Cell Structure & Magnification)",
@@ -70,10 +67,10 @@ CAMBRIDGE_SYLLABUS = [
 ]
 
 # State Management
-if "student_name" not in st.session_state:
-    st.session_state.student_name = "Omar Mohamed"
 if "student_email" not in st.session_state:
     st.session_state.student_email = ""
+if "student_name" not in st.session_state:
+    st.session_state.student_name = ""
 if "drill_active" not in st.session_state:
     st.session_state.drill_active = False
 if "current_question" not in st.session_state:
@@ -96,39 +93,56 @@ if "show_summary" not in st.session_state:
 st.sidebar.title("🧬 BioMastery IGCSE")
 st.sidebar.caption("AI Cambridge Diagnostic Platform")
 
-menu = st.sidebar.radio("Navigation", ["🎯 Infinite Practice Mode", "⚙️ Candidate Profile"])
+menu = st.sidebar.radio("Navigation", ["🎯 Infinite Practice Mode", "🏆 Leaderboard"])
 
-if menu == "⚙️ Candidate Profile":
-    st.header("⚙️ Candidate Profile Settings")
-    student_input = st.text_input("Candidate Name:", value=st.session_state.student_name)
-    email_input = st.text_input("Candidate Email (for score reports):", value=st.session_state.student_email)
-    if st.button("Save Profile"):
-        st.session_state.student_name = student_input
-        st.session_state.student_email = email_input
-        st.success("Profile saved!")
+# 1. LEADERBOARD TAB
+if menu == "🏆 Leaderboard":
+    st.header("🏆 Live Cambridge Student Leaderboard")
+    st.caption("Rankings update automatically based on total marks scored across all drill sessions.")
+    
+    leaderboard_data = get_leaderboard()
+    if leaderboard_data:
+        df_lb = pd.DataFrame(leaderboard_data, columns=["Candidate Name", "Total Marks Scored", "Total Questions Solved", "Accuracy (%)"])
+        df_lb.index = df_lb.index + 1  # 1-based rank indexing
+        
+        st.dataframe(df_lb, use_container_width=True)
+    else:
+        st.info("No leaderboard entries recorded yet. Be the first to launch a session and log a score!")
 
+# 2. INFINITE PRACTICE DRILL
 elif menu == "🎯 Infinite Practice Mode":
     st.markdown('<div class="main-header">Infinite AI Diagnostic Drill</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="sub-header">Candidate: <b>{st.session_state.student_name}</b> | Interactive Diagnostic Session</div>', unsafe_allow_html=True)
 
     keys_pool = st.secrets.get("GEMINI_API_KEYS", st.secrets.get("GEMINI_API_KEY", ""))
 
     if not st.session_state.drill_active and not st.session_state.show_summary:
-        st.subheader("🛠 Configure Exam Session")
+        st.subheader("🛠 Launch Practice Drill")
         c1, c2 = st.columns(2)
         with c1:
+            raw_email = st.text_input("Enter your Gmail address:", placeholder="e.g. omar@gmail.com")
+            
+            # Automatically parse student name from Gmail address
+            if raw_email and "@" in raw_email:
+                extracted_name = raw_email.split("@")[0].replace(".", " ").replace("_", " ").title()
+                st.caption(f"👤 Auto-detected Candidate Name: **{extracted_name}**")
+            else:
+                extracted_name = ""
+
             selected_paper = st.selectbox("Select Paper Focus:", ["Paper 2 (Multiple Choice)", "Paper 4 (Theory & Data Analysis)", "Paper 6 (Alternative to Practical)"])
-            student_email = st.text_input("Enter your Gmail address for full report:", value=st.session_state.student_email, placeholder="student@gmail.com")
+
         with c2:
             selected_topic = st.selectbox("Select Cambridge Chapter:", CAMBRIDGE_SYLLABUS)
 
-        if st.button("🚀 Launch Diagnostic Session", type="primary"):
-            if not keys_pool:
+        if st.button("🚀 Start Drill Session", type="primary"):
+            if not raw_email or "@" not in raw_email:
+                st.error("Please enter a valid Gmail address to track your leaderboard score!")
+            elif not keys_pool:
                 st.error("❌ No API Keys found in Streamlit Secrets!")
             else:
+                st.session_state.student_email = raw_email.strip().lower()
+                st.session_state.student_name = extracted_name
                 st.session_state.selected_paper = selected_paper
                 st.session_state.selected_topic = selected_topic
-                st.session_state.student_email = student_email
                 st.session_state.drill_active = True
                 st.session_state.question_count = 0
                 st.session_state.correct_count = 0
@@ -140,32 +154,29 @@ elif menu == "🎯 Infinite Practice Mode":
                 st.rerun()
 
     elif st.session_state.show_summary:
-        # POST-DRILL SUMMARY & REPORT VIEW
         st.balloons()
-        st.header("📊 Diagnostic Performance Report")
+        st.header("📊 Performance & Leaderboard Report")
         
         total_q = st.session_state.question_count
         corr_q = st.session_state.correct_count
         pct = round((corr_q / total_q) * 100, 1) if total_q > 0 else 0.0
 
         col_m1, col_m2, col_m3 = st.columns(3)
-        col_m1.metric("Final Score", f"{corr_q} / {total_q}")
-        col_m2.metric("Accuracy Percentage", f"{pct}%")
-        col_m3.metric("Chapter Focus", st.session_state.selected_topic.split('.')[0])
+        col_m1.metric("Candidate Name", st.session_state.student_name)
+        col_m2.metric("Final Score", f"{corr_q} / {total_q}")
+        col_m3.metric("Accuracy Percentage", f"{pct}%")
 
         st.divider()
-        
-        # Analyze Strong and Weak Points
+
         matched_kw_set = set()
         missing_kw_set = set()
-        
         for log in st.session_state.session_logs:
             matched_kw_set.update(log.get("matched_keywords", []))
             missing_kw_set.update(log.get("missing_keywords", []))
 
         col_s1, col_s2 = st.columns(2)
         with col_s1:
-            st.subheader("🟢 Strong Points & Mastered Terms")
+            st.subheader("🟢 Mastered Keywords")
             if matched_kw_set:
                 for kw in matched_kw_set:
                     st.markdown(f"- ✅ `{kw}`")
@@ -173,15 +184,12 @@ elif menu == "🎯 Infinite Practice Mode":
                 st.info("Keep practicing to build your keyword bank!")
 
         with col_s2:
-            st.subheader("🔴 Areas for Improvement (Examiner Traps)")
+            st.subheader("🔴 Areas for Improvement")
             if missing_kw_set:
                 for kw in missing_kw_set:
-                    st.markdown(f"- ⚠️ `{kw}` (Required for full marks)")
+                    st.markdown(f"- ⚠️ `{kw}`")
             else:
-                st.success("Excellent precision! No missing keywords identified.")
-
-        if st.session_state.student_email:
-            st.success(f"📩 Performance summary ready for **{st.session_state.student_email}**!")
+                st.success("Perfect accuracy! No missing keywords identified.")
 
         if st.button("Start New Drill"):
             st.session_state.drill_active = False
@@ -190,7 +198,6 @@ elif menu == "🎯 Infinite Practice Mode":
             st.rerun()
 
     else:
-        # ACTIVE QUESTION DISPLAY
         if st.session_state.current_question is None:
             with st.spinner("🤖 Gemini 3.8-Flash is generating question & setting timer..."):
                 try:
@@ -212,12 +219,11 @@ elif menu == "🎯 Infinite Practice Mode":
         elapsed_sec = int(time.time() - st.session_state.question_start_time)
         remaining_sec = max(0, allowed_sec - elapsed_sec)
 
-        # Trigger audio and visual warning when remaining time <= 10 seconds
         if 0 < remaining_sec <= 10 and not st.session_state.show_feedback:
             st.components.v1.html(COUNTDOWN_AUDIO_HTML, height=0)
 
         s1, s2, s3, s4 = st.columns([1.5, 1, 1, 1])
-        s1.markdown(f"**Format:** `{'Paper 2 MCQ' if is_mcq else 'Written Response'}` | **Q#{st.session_state.question_count + 1}**")
+        s1.markdown(f"**Candidate:** `{st.session_state.student_name}` | **Q#{st.session_state.question_count + 1}**")
         s2.markdown(f"**Score:** `{st.session_state.correct_count}/{st.session_state.question_count}`")
         s3.markdown(f'<span class="ai-badge">AI Timer: {allowed_sec}s</span>', unsafe_allow_html=True)
         
@@ -228,7 +234,6 @@ elif menu == "🎯 Infinite Practice Mode":
 
         st.write("")
 
-        # Question Presentation
         st.markdown(f"""
         <div class="question-box">
             <span style="color:#0284C7; font-weight:bold; font-size:0.9rem;">[{q.get('syllabus_code', '0610')}] — {q.get('command_word', 'Question')}</span>
@@ -261,11 +266,17 @@ elif menu == "🎯 Infinite Practice Mode":
                             "missing_keywords": [] if is_corr else q.get("keywords", [])
                         })
                         
-                        log_score(st.session_state.student_name, st.session_state.selected_topic, st.session_state.correct_count, st.session_state.question_count)
+                        log_score(
+                            st.session_state.student_email, 
+                            st.session_state.student_name, 
+                            st.session_state.selected_topic, 
+                            1 if is_corr else 0, 
+                            1
+                        )
                         st.rerun()
 
                 with c_btn2:
-                    if st.button("🏁 End Session & Summary"):
+                    if st.button("🏁 End Session & Save Score"):
                         st.session_state.drill_active = False
                         st.session_state.show_summary = True
                         st.rerun()
@@ -297,22 +308,28 @@ elif menu == "🎯 Infinite Practice Mode":
                                 st.session_state.written_eval = eval_result
                                 st.session_state.show_feedback = True
                                 st.session_state.question_count += 1
-                                is_corr = eval_result.get("score_awarded", 0) > 0
-                                if is_corr:
+                                score_awarded = eval_result.get("score_awarded", 0)
+                                if score_awarded > 0:
                                     st.session_state.correct_count += 1
                                 
                                 st.session_state.session_logs.append({
                                     "question": q['question'],
-                                    "is_correct": is_corr,
+                                    "is_correct": score_awarded > 0,
                                     "matched_keywords": eval_result.get("matched_keywords", []),
                                     "missing_keywords": eval_result.get("missing_keywords", [])
                                 })
                                 
-                                log_score(st.session_state.student_name, st.session_state.selected_topic, st.session_state.correct_count, st.session_state.question_count)
+                                log_score(
+                                    st.session_state.student_email, 
+                                    st.session_state.student_name, 
+                                    st.session_state.selected_topic, 
+                                    score_awarded, 
+                                    1
+                                )
                                 st.rerun()
 
                 with c_btn2:
-                    if st.button("🏁 End Session & Summary"):
+                    if st.button("🏁 End Session & Save Score"):
                         st.session_state.drill_active = False
                         st.session_state.show_summary = True
                         st.rerun()
