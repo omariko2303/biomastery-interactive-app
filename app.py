@@ -1,7 +1,7 @@
 import streamlit as st
 import time
 import pandas as pd
-from question_generator import generate_single_question
+from question_generator import generate_single_question, evaluate_written_answer
 from database import init_local_db, log_score
 
 # Page Config
@@ -22,7 +22,8 @@ st.markdown("""
     .question-box { background-color: #FFFFFF; border-left: 5px solid #0284C7; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px; }
     .examiner-box-success { background-color: #F0FDF4; border: 1px solid #BBF7D0; border-left: 5px solid #16A34A; padding: 15px; border-radius: 8px; margin-top: 15px; }
     .examiner-box-error { background-color: #FEF2F2; border: 1px solid #FECACA; border-left: 5px solid #DC2626; padding: 15px; border-radius: 8px; margin-top: 15px; }
-    .keyword-pill { display: inline-block; background-color: #E0F2FE; color: #0369A1; font-weight: 600; padding: 3px 10px; border-radius: 12px; font-size: 0.85rem; margin-right: 5px; margin-top: 5px; }
+    .keyword-pill-matched { display: inline-block; background-color: #DCFCE7; color: #15803D; font-weight: 600; padding: 3px 10px; border-radius: 12px; font-size: 0.85rem; margin-right: 5px; margin-top: 5px; }
+    .keyword-pill-missing { display: inline-block; background-color: #FEE2E2; color: #B91C1C; font-weight: 600; padding: 3px 10px; border-radius: 12px; font-size: 0.85rem; margin-right: 5px; margin-top: 5px; }
     .timer-badge { background-color: #FEF3C7; color: #92400E; font-weight: bold; padding: 8px 15px; border-radius: 20px; font-size: 1.1rem; border: 1px solid #FCD34D; text-align: center; }
     .ai-badge { background-color: #F3E8FF; color: #6B21A8; font-weight: bold; padding: 4px 10px; border-radius: 10px; font-size: 0.85rem; }
 </style>
@@ -66,6 +67,8 @@ if "correct_count" not in st.session_state:
     st.session_state.correct_count = 0
 if "show_feedback" not in st.session_state:
     st.session_state.show_feedback = False
+if "written_eval" not in st.session_state:
+    st.session_state.written_eval = None
 if "question_start_time" not in st.session_state:
     st.session_state.question_start_time = None
 
@@ -75,7 +78,7 @@ st.sidebar.caption("AI Cambridge Diagnostic Platform")
 menu = st.sidebar.radio("Navigation", ["🎯 Infinite Practice Mode", "⚙️ Candidate Profile"])
 
 if menu == "⚙️ Candidate Profile":
-    st.header("⚙️ Profile Settings")
+    st.header("⚙️️ Profile Settings")
     student_input = st.text_input("Active Candidate Name:", value=st.session_state.student_name)
     if st.button("Save Name"):
         st.session_state.student_name = student_input
@@ -83,9 +86,8 @@ if menu == "⚙️ Candidate Profile":
 
 elif menu == "🎯 Infinite Practice Mode":
     st.markdown('<div class="main-header">Infinite AI Diagnostic Drill</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="sub-header">Active Candidate: <b>{st.session_state.student_name}</b> | Multi-Key Rotation Engine</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sub-header">Candidate: <b>{st.session_state.student_name}</b> | Paper 2 (MCQ) vs Paper 4/6 (Written) Engine</div>', unsafe_allow_html=True)
 
-    # Fetch single key or list of keys
     keys_pool = st.secrets.get("GEMINI_API_KEYS", st.secrets.get("GEMINI_API_KEY", ""))
 
     if not st.session_state.drill_active:
@@ -98,7 +100,7 @@ elif menu == "🎯 Infinite Practice Mode":
 
         if st.button("🚀 Launch Diagnostic Session", type="primary"):
             if not keys_pool:
-                st.error("❌ No API Keys found in Streamlit Secrets! Configure GEMINI_API_KEYS or GEMINI_API_KEY.")
+                st.error("❌ No API Keys found in Streamlit Secrets!")
             else:
                 st.session_state.selected_paper = selected_paper
                 st.session_state.selected_topic = selected_topic
@@ -107,16 +109,18 @@ elif menu == "🎯 Infinite Practice Mode":
                 st.session_state.correct_count = 0
                 st.session_state.current_question = None
                 st.session_state.show_feedback = False
+                st.session_state.written_eval = None
                 st.rerun()
 
     else:
         if st.session_state.current_question is None:
-            with st.spinner("🤖 Gemini 3.8-Flash is generating question & evaluating timing..."):
+            with st.spinner("🤖 Gemini 3.8-Flash is generating paper-specific question & setting timer..."):
                 try:
                     q_data = generate_single_question(keys_pool, st.session_state.selected_paper, st.session_state.selected_topic)
                     st.session_state.current_question = q_data
                     st.session_state.question_start_time = time.time()
                     st.session_state.show_feedback = False
+                    st.session_state.written_eval = None
                     st.rerun()
                 except Exception as e:
                     st.error(f"Generation error: {e}")
@@ -125,14 +129,15 @@ elif menu == "🎯 Infinite Practice Mode":
                     st.stop()
 
         q = st.session_state.current_question
+        is_mcq = q.get("question_format") == "MULTIPLE_CHOICE"
         allowed_sec = q.get("allowed_time_seconds", 60)
         elapsed_sec = int(time.time() - st.session_state.question_start_time)
         remaining_sec = allowed_sec - elapsed_sec
 
         s1, s2, s3, s4 = st.columns([1.5, 1, 1, 1])
-        s1.markdown(f"**Chapter:** `{st.session_state.selected_topic.split('.')[0]}` | **Q#{st.session_state.question_count + 1}**")
+        s1.markdown(f"**Format:** `{'Paper 2 MCQ' if is_mcq else 'Written Response'}` | **Q#{st.session_state.question_count + 1}**")
         s2.markdown(f"**Score:** `{st.session_state.correct_count}/{st.session_state.question_count}`")
-        s3.markdown(f'<span class="ai-badge">AI Timer: {allowed_sec}s ({q.get("difficulty_level", "Core")})</span>', unsafe_allow_html=True)
+        s3.markdown(f'<span class="ai-badge">AI Timer: {allowed_sec}s</span>', unsafe_allow_html=True)
         
         if remaining_sec > 0:
             s4.markdown(f'<div class="timer-badge">⏱ {remaining_sec}s</div>', unsafe_allow_html=True)
@@ -141,6 +146,7 @@ elif menu == "🎯 Infinite Practice Mode":
 
         st.write("")
 
+        # Question Display
         st.markdown(f"""
         <div class="question-box">
             <span style="color:#0284C7; font-weight:bold; font-size:0.9rem;">[{q.get('syllabus_code', '0610')}] — {q.get('command_word', 'Question')}</span>
@@ -148,40 +154,85 @@ elif menu == "🎯 Infinite Practice Mode":
         </div>
         """, unsafe_allow_html=True)
 
-        selected_option = st.radio(
-            "Select your answer:",
-            options=q["options"],
-            key=f"opt_{st.session_state.question_count}",
-            disabled=st.session_state.show_feedback
-        )
+        # PAPER 2: MULTIPLE CHOICE INTERFACE
+        if is_mcq:
+            selected_option = st.radio(
+                "Select your option:",
+                options=q["options"],
+                key=f"mcq_opt_{st.session_state.question_count}",
+                disabled=st.session_state.show_feedback
+            )
 
-        if not st.session_state.show_feedback:
-            if st.button("Submit Answer", type="primary"):
-                st.session_state.show_feedback = True
-                is_corr = q["options"].index(selected_option) == q["correct_index"]
-                st.session_state.question_count += 1
-                if is_corr:
-                    st.session_state.correct_count += 1
-                log_score(st.session_state.student_name, st.session_state.selected_topic, st.session_state.correct_count, st.session_state.question_count)
-                st.rerun()
+            if not st.session_state.show_feedback:
+                if st.button("Submit MCQ Answer", type="primary"):
+                    st.session_state.show_feedback = True
+                    is_corr = q["options"].index(selected_option) == q["correct_index"]
+                    st.session_state.question_count += 1
+                    if is_corr:
+                        st.session_state.correct_count += 1
+                    log_score(st.session_state.student_name, st.session_state.selected_topic, st.session_state.correct_count, st.session_state.question_count)
+                    st.rerun()
 
-        else:
-            is_corr = q["options"].index(selected_option) == q["correct_index"]
-            if is_corr:
-                st.markdown(f'<div class="examiner-box-success"><h4>✅ Correct (+1 Mark)</h4><p>{q["examiner_note"]}</p></div>', unsafe_allow_html=True)
             else:
-                st.markdown(f'<div class="examiner-box-error"><h4>❌ Incorrect Choice</h4><p><b>Correct Option:</b> {q["options"][q["correct_index"]]}</p><p>{q["examiner_note"]}</p></div>', unsafe_allow_html=True)
+                is_corr = q["options"].index(selected_option) == q["correct_index"]
+                if is_corr:
+                    st.markdown(f'<div class="examiner-box-success"><h4>✅ Correct (+1 Mark)</h4><p>{q["examiner_note"]}</p></div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<div class="examiner-box-error"><h4>❌ Incorrect Option</h4><p><b>Correct Answer:</b> {q["options"][q["correct_index"]]}</p><p>{q["examiner_note"]}</p></div>', unsafe_allow_html=True)
 
-            st.markdown("##### 🔑 Compulsory Keywords:")
-            kw_html = "".join([f'<span class="keyword-pill">{kw}</span>' for kw in q.get('keywords', [])])
-            st.markdown(kw_html, unsafe_allow_html=True)
+        # PAPER 4 & PAPER 6: WRITTEN RESPONSE INTERFACE
+        else:
+            user_text_response = st.text_area(
+                "Write your answer below (use precise Cambridge scientific terminology):",
+                key=f"written_opt_{st.session_state.question_count}",
+                disabled=st.session_state.show_feedback,
+                height=130
+            )
+
+            if not st.session_state.show_feedback:
+                if st.button("Submit Written Answer for AI Examiner Review", type="primary"):
+                    if not user_text_response.strip():
+                        st.warning("Please type your response before submitting!")
+                    else:
+                        with st.spinner("🤖 Senior Examiner evaluating response against Mark Scheme keywords..."):
+                            eval_result = evaluate_written_answer(keys_pool, q, user_text_response)
+                            st.session_state.written_eval = eval_result
+                            st.session_state.show_feedback = True
+                            st.session_state.question_count += 1
+                            if eval_result.get("score_awarded", 0) > 0:
+                                st.session_state.correct_count += 1
+                            log_score(st.session_state.student_name, st.session_state.selected_topic, st.session_state.correct_count, st.session_state.question_count)
+                            st.rerun()
+
+            else:
+                eval_res = st.session_state.written_eval or {}
+                score = eval_res.get("score_awarded", 0)
+                
+                if score > 0:
+                    st.markdown(f'<div class="examiner-box-success"><h4>✅ Full Marks Awarded</h4><p>{eval_res.get("examiner_feedback")}</p></div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<div class="examiner-box-error"><h4>⚠️ Mark Loss / Incomplete Key Terms</h4><p>{eval_res.get("examiner_feedback")}</p></div>', unsafe_allow_html=True)
+
+                st.markdown(f"**Ideal Cambridge Model Answer:**\n> {q.get('model_answer', 'N/A')}")
+                
+                # Show Keyword Matches
+                matched = eval_res.get("matched_keywords", [])
+                missing = eval_res.get("missing_keywords", [])
+                
+                st.markdown("##### 🔑 Keyword Checklist:")
+                html_kw = "".join([f'<span class="keyword-pill-matched">✓ {kw}</span>' for kw in matched])
+                html_kw += "".join([f'<span class="keyword-pill-missing">✗ {kw}</span>' for kw in missing])
+                st.markdown(html_kw, unsafe_allow_html=True)
+
+        # NEXT / END CONTROLS
+        if st.session_state.show_feedback:
             st.write("")
-
             b1, b2 = st.columns([2, 1])
             with b1:
                 if st.button("Next Question ➔", type="primary"):
                     st.session_state.current_question = None
                     st.session_state.show_feedback = False
+                    st.session_state.written_eval = None
                     st.rerun()
             with b2:
                 if st.button("🏁 End Session"):
