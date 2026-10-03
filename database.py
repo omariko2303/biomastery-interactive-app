@@ -1,67 +1,43 @@
 import sqlite3
 
-DB_FILE = "biomastery_local.db"
-
 def init_local_db():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    
-    # Create main table if it doesn't exist
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS local_logs (
+    conn = sqlite3.connect("biomastery.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS student_scores (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            student_email TEXT,
-            student_name TEXT,
+            email TEXT,
+            name TEXT,
             topic TEXT,
             score INTEGER,
-            total INTEGER,
+            questions_count INTEGER,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
-    ''')
-    
-    # Safely migrate existing tables if columns are missing
-    c.execute("PRAGMA table_info(local_logs)")
-    columns = [column[1] for column in c.fetchall()]
-    
-    if "student_email" not in columns:
-        c.execute("ALTER TABLE local_logs ADD COLUMN student_email TEXT")
-    if "student_name" not in columns:
-        c.execute("ALTER TABLE local_logs ADD COLUMN student_name TEXT")
-        
+    """)
     conn.commit()
     conn.close()
 
-def log_score(student_email, student_name, topic, score, total):
-    init_local_db()  # Ensure table structure is valid
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute(
-        "INSERT INTO local_logs (student_email, student_name, topic, score, total) VALUES (?, ?, ?, ?, ?)", 
-        (student_email, student_name, topic, score, total)
-    )
+def log_score(email, name, topic, score, q_count=1):
+    conn = sqlite3.connect("biomastery.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO student_scores (email, name, topic, score, questions_count)
+        VALUES (?, ?, ?, ?, ?)
+    """, (email, name, topic, score, q_count))
     conn.commit()
     conn.close()
 
 def get_leaderboard():
-    init_local_db()  # Ensure table structure is valid
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    try:
-        c.execute('''
-            SELECT 
-                COALESCE(student_name, 'Anonymous Candidate') as student_name,
-                SUM(score) as total_score,
-                SUM(total) as total_questions,
-                ROUND((CAST(SUM(score) AS FLOAT) / CAST(SUM(total) AS FLOAT)) * 100, 1) as accuracy
-            FROM local_logs
-            GROUP BY student_email
-            HAVING total_questions > 0
-            ORDER BY total_score DESC, accuracy DESC
-        ''')
-        rows = c.fetchall()
-    except Exception as e:
-        print(f"[Leaderboard Error] {e}")
-        rows = []
-    finally:
-        conn.close()
+    conn = sqlite3.connect("biomastery.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT name, SUM(score) as total_score, SUM(questions_count) as total_qs,
+               ROUND((CAST(SUM(score) AS FLOAT) / SUM(questions_count)) * 100, 1) as accuracy
+        FROM student_scores
+        GROUP BY email
+        ORDER BY total_score DESC, accuracy DESC
+        LIMIT 10
+    """)
+    rows = cursor.fetchall()
+    conn.close()
     return rows
