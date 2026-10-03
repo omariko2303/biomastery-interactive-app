@@ -4,7 +4,7 @@ import pandas as pd
 from question_generator import generate_single_question, evaluate_written_answer
 from database import init_local_db, log_score, get_leaderboard
 
-# Page Config
+# Page Configuration
 st.set_page_config(
     page_title="BioMastery IGCSE | AI Portal",
     page_icon="🧬",
@@ -19,6 +19,7 @@ st.markdown("""
 <style>
     .main-header { font-size: 2.2rem; font-weight: 700; color: #0E7490; margin-bottom: 0.2rem; }
     .sub-header { font-size: 1.05rem; color: #475569; margin-bottom: 1.5rem; }
+    .login-card { background-color: #FFFFFF; border-radius: 12px; padding: 30px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); border-top: 5px solid #0284C7; max-width: 550px; margin: 40px auto; }
     .question-box { background-color: #FFFFFF; border-left: 5px solid #0284C7; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px; }
     .examiner-box-success { background-color: #F0FDF4; border: 1px solid #BBF7D0; border-left: 5px solid #16A34A; padding: 15px; border-radius: 8px; margin-top: 15px; }
     .examiner-box-error { background-color: #FEF2F2; border: 1px solid #FECACA; border-left: 5px solid #DC2626; padding: 15px; border-radius: 8px; margin-top: 15px; }
@@ -66,7 +67,9 @@ CAMBRIDGE_SYLLABUS = [
     "21. Human Influences on Ecosystems (Deforestation, Pollution, Conservation)"
 ]
 
-# State Management
+# State Management Initialization
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
 if "student_email" not in st.session_state:
     st.session_state.student_email = ""
 if "student_name" not in st.session_state:
@@ -90,12 +93,57 @@ if "session_logs" not in st.session_state:
 if "show_summary" not in st.session_state:
     st.session_state.show_summary = False
 
-st.sidebar.title("🧬 BioMastery IGCSE")
-st.sidebar.caption("AI Cambridge Diagnostic Platform")
 
+# --- 1. OBLIGATORY ENTRY GATE (GMAIL / ICLOUD) ---
+if not st.session_state.authenticated:
+    st.markdown('<div class="main-header" style="text-align: center;">🧬 BioMastery IGCSE</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header" style="text-align: center;">Cambridge AI Engine & Live Performance Tracking</div>', unsafe_allow_html=True)
+    
+    st.markdown("""
+    <div class="login-card">
+        <h3 style="color: #0F172A; margin-top: 0;">🔒 Mandatory Student Verification</h3>
+        <p style="color: #475569; font-size: 0.95rem;">Please sign in with your official <b>Gmail</b> or <b>iCloud</b> address to unlock practice drills, log leaderboard scores, and receive feedback.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        user_email_input = st.text_input("Enter your Gmail or iCloud address:", placeholder="e.g., candidate@gmail.com or student@icloud.com")
+        
+        if st.button("🚀 Sign In & Continue", type="primary", use_container_width=True):
+            clean_email = user_email_input.strip().lower()
+            
+            # Validation rule for Gmail or iCloud
+            if not clean_email or not ("@gmail.com" in clean_email or "@icloud.com" in clean_email):
+                st.error("⚠️ Access restricted. Please enter a valid Gmail (@gmail.com) or iCloud (@icloud.com) address.")
+            else:
+                # Extract candidate name automatically from handle
+                handle = clean_email.split("@")[0]
+                extracted_name = handle.replace(".", " ").replace("_", " ").replace("-", " ").title()
+                
+                st.session_state.student_email = clean_email
+                st.session_state.student_name = extracted_name
+                st.session_state.authenticated = True
+                st.rerun()
+    st.stop()  # Halt execution so non-authenticated users cannot bypass screen
+
+
+# --- 2. AUTHENTICATED APP CONTENT ---
+st.sidebar.title("🧬 BioMastery IGCSE")
+st.sidebar.markdown(f"Candidate: **{st.session_state.student_name}**")
+st.sidebar.caption(f"📧 `{st.session_state.student_email}`")
+
+if st.sidebar.button("🚪 Sign Out / Switch Account"):
+    st.session_state.authenticated = False
+    st.session_state.student_email = ""
+    st.session_state.student_name = ""
+    st.session_state.drill_active = False
+    st.rerun()
+
+st.sidebar.divider()
 menu = st.sidebar.radio("Navigation", ["🎯 Infinite Practice Mode", "🏆 Leaderboard"])
 
-# 1. LEADERBOARD TAB
+# LEADERBOARD VIEW
 if menu == "🏆 Leaderboard":
     st.header("🏆 Live Cambridge Student Leaderboard")
     st.caption("Rankings update automatically based on total marks scored across all drill sessions.")
@@ -103,44 +151,29 @@ if menu == "🏆 Leaderboard":
     leaderboard_data = get_leaderboard()
     if leaderboard_data:
         df_lb = pd.DataFrame(leaderboard_data, columns=["Candidate Name", "Total Marks Scored", "Total Questions Solved", "Accuracy (%)"])
-        df_lb.index = df_lb.index + 1  # 1-based rank indexing
-        
+        df_lb.index = df_lb.index + 1
         st.dataframe(df_lb, use_container_width=True)
     else:
-        st.info("No leaderboard entries recorded yet. Be the first to launch a session and log a score!")
+        st.info("No leaderboard entries recorded yet. Be the first to launch a session!")
 
-# 2. INFINITE PRACTICE DRILL
+# PRACTICE DRILL VIEW
 elif menu == "🎯 Infinite Practice Mode":
     st.markdown('<div class="main-header">Infinite AI Diagnostic Drill</div>', unsafe_allow_html=True)
 
     keys_pool = st.secrets.get("GEMINI_API_KEYS", st.secrets.get("GEMINI_API_KEY", ""))
 
     if not st.session_state.drill_active and not st.session_state.show_summary:
-        st.subheader("🛠 Launch Practice Drill")
+        st.subheader("🛠 Configure Exam Session")
         c1, c2 = st.columns(2)
         with c1:
-            raw_email = st.text_input("Enter your Gmail address:", placeholder="e.g. omar@gmail.com")
-            
-            # Automatically parse student name from Gmail address
-            if raw_email and "@" in raw_email:
-                extracted_name = raw_email.split("@")[0].replace(".", " ").replace("_", " ").title()
-                st.caption(f"👤 Auto-detected Candidate Name: **{extracted_name}**")
-            else:
-                extracted_name = ""
-
             selected_paper = st.selectbox("Select Paper Focus:", ["Paper 2 (Multiple Choice)", "Paper 4 (Theory & Data Analysis)", "Paper 6 (Alternative to Practical)"])
-
         with c2:
             selected_topic = st.selectbox("Select Cambridge Chapter:", CAMBRIDGE_SYLLABUS)
 
-        if st.button("🚀 Start Drill Session", type="primary"):
-            if not raw_email or "@" not in raw_email:
-                st.error("Please enter a valid Gmail address to track your leaderboard score!")
-            elif not keys_pool:
+        if st.button("🚀 Launch Diagnostic Session", type="primary"):
+            if not keys_pool:
                 st.error("❌ No API Keys found in Streamlit Secrets!")
             else:
-                st.session_state.student_email = raw_email.strip().lower()
-                st.session_state.student_name = extracted_name
                 st.session_state.selected_paper = selected_paper
                 st.session_state.selected_topic = selected_topic
                 st.session_state.drill_active = True
@@ -155,7 +188,7 @@ elif menu == "🎯 Infinite Practice Mode":
 
     elif st.session_state.show_summary:
         st.balloons()
-        st.header("📊 Performance & Leaderboard Report")
+        st.header("📊 Diagnostic Performance Report")
         
         total_q = st.session_state.question_count
         corr_q = st.session_state.correct_count
@@ -199,7 +232,7 @@ elif menu == "🎯 Infinite Practice Mode":
 
     else:
         if st.session_state.current_question is None:
-            with st.spinner("🤖 Gemini 3.8-Flash is generating question & setting timer..."):
+            with st.spinner("🤖 Gemini is generating question & setting timer..."):
                 try:
                     q_data = generate_single_question(keys_pool, st.session_state.selected_paper, st.session_state.selected_topic)
                     st.session_state.current_question = q_data
@@ -367,3 +400,4 @@ elif menu == "🎯 Infinite Practice Mode":
                     st.session_state.drill_active = False
                     st.session_state.show_summary = True
                     st.rerun()
+                
