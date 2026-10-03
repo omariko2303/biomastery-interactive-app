@@ -1,32 +1,22 @@
 import json
 import random
-import google.generativeai as genai
 
 def get_high_yield_question(paper_focus, topic):
-    """
-    Retrieves 100% accurate, pre-curated exam questions from local JSON repository.
-    """
+    """Retrieves pre-curated exam questions from local JSON repository."""
     try:
         with open("questions_bank.json", "r") as f:
             bank = json.load(f)
             
-        # Filter by paper and topic
-        filtered = [
-            q for q in bank 
-            if q.get("paper") == paper_focus and q.get("topic") == topic
-        ]
-        
+        filtered = [q for q in bank if q.get("paper") == paper_focus and q.get("topic") == topic]
         if filtered:
             return random.choice(filtered)
-        
-        # Fallback to any question matching the paper
+            
         paper_filtered = [q for q in bank if q.get("paper") == paper_focus]
         if paper_filtered:
             return random.choice(paper_filtered)
             
         return random.choice(bank)
     except Exception:
-        # Fallback question if file is missing or reading fails
         return {
             "id": "P4_FALLBACK",
             "paper": paper_focus,
@@ -38,39 +28,50 @@ def get_high_yield_question(paper_focus, topic):
             "reject_terms": []
         }
 
-def evaluate_written_answer(api_key, question_data, student_answer):
+def evaluate_written_answer_fast(question_data, student_answer):
     """
-    Evaluates written answers using strict mark scheme criteria.
+    Instantly evaluates student written answers locally against mark scheme keywords.
+    Completes in under 10ms without API latency.
     """
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    text = student_answer.lower().strip()
+    keywords = question_data.get("keywords", [])
+    reject_terms = question_data.get("reject_terms", [])
+    
+    matched = []
+    missing = []
+    
+    # Check for forbidden/rejected phrasing
+    for reject in reject_terms:
+        if reject.lower() in text:
+            return {
+                "score_awarded": 0,
+                "matched_keywords": [],
+                "missing_keywords": keywords,
+                "examiner_feedback": f"❌ Rejected term used ('{reject}'). Cambridge mark scheme explicitly forbids this phrasing."
+            }
+            
+    # Check for required keywords
+    for kw in keywords:
+        if kw.lower() in text:
+            matched.append(kw)
+        else:
+            missing.append(kw)
+            
+    # Calculate mark allocation
+    max_marks = question_data.get("marks", len(keywords))
+    if len(keywords) > 0:
+        score = round((len(matched) / len(keywords)) * max_marks)
+    else:
+        score = max_marks if len(text) > 5 else 0
 
-    prompt = f"""
-    You are a Senior Cambridge IGCSE Biology Examiner (0610).
-    
-    QUESTION: {question_data['question']}
-    MODEL ANSWER / MARK SCHEME: {question_data.get('model_answer')}
-    REQUIRED KEYWORDS: {question_data.get('keywords', [])}
-    REJECT TERMS: {question_data.get('reject_terms', [])}
-    
-    STUDENT ANSWER: "{student_answer}"
-    
-    Evaluate strictly according to Cambridge mark schemes:
-    1. Check for accurate scientific terminology.
-    2. Reject vague terms like "makes energy" (must be "releases energy") or "attracts light".
-    
-    Return a valid JSON object ONLY:
-    {{
-        "score_awarded": 1 or 0,
-        "matched_keywords": ["kw1", "kw2"],
-        "missing_keywords": ["kw3"],
-        "examiner_feedback": "Detailed Cambridge examiner comment on mark scheme alignment."
-    }}
-    """
-    
-    response = model.generate_content(
-        prompt,
-        generation_config={"response_mime_type": "application/json"}
-    )
-    
-    return json.loads(response.text)
+    if score > 0:
+        feedback = f"✅ Matched {len(matched)} of {len(keywords)} required mark scheme point(s)."
+    else:
+        feedback = "⚠️ Missing key scientific terms required by the Cambridge mark scheme."
+
+    return {
+        "score_awarded": score,
+        "matched_keywords": matched,
+        "missing_keywords": missing,
+        "examiner_feedback": feedback
+    }
