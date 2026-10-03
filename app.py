@@ -98,40 +98,50 @@ if "show_summary" not in st.session_state:
 if not st.session_state.authenticated:
     st.markdown('<div class="main-header" style="text-align: center;">🧬 BioMastery IGCSE</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-header" style="text-align: center;">Cambridge AI Engine & Live Performance Tracking</div>', unsafe_allow_html=True)
-    
-    st.markdown("""
-    <div class="login-card">
-        <h3 style="color: #0F172A; margin-top: 0;">🔒 Mandatory Student Verification</h3>
-        <p style="color: #475569; font-size: 0.95rem;">Please sign in with your official <b>Gmail</b> or <b>iCloud</b> address to unlock practice drills, log leaderboard scores, and receive feedback.</p>
-    </div>
-    """, unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        user_email_input = st.text_input("Enter your Gmail or iCloud address:", placeholder="e.g., candidate@gmail.com or student@icloud.com")
+        st.markdown("### 🔒 Mandatory Student Verification")
+        st.caption("Please sign in with your official Gmail or iCloud address.")
+
+        user_email_input = st.text_input("Enter Email (Gmail or iCloud):", placeholder="e.g. omar@gmail.com")
+        
+        # Auto-extract default name suggestion
+        default_suggested_name = ""
+        if user_email_input and "@" in user_email_input:
+            handle = user_email_input.split("@")[0]
+            default_suggested_name = handle.replace(".", " ").replace("_", " ").replace("-", " ").title()
+
+        # Allow user to edit their official name explicitly
+        custom_candidate_name = st.text_input(
+            "Official Candidate Name (for Leaderboard & Reports):", 
+            value=default_suggested_name, 
+            placeholder="e.g. Omar Mohamed"
+        )
         
         if st.button("🚀 Sign In & Continue", type="primary", use_container_width=True):
             clean_email = user_email_input.strip().lower()
             
-            # Validation rule for Gmail or iCloud
             if not clean_email or not ("@gmail.com" in clean_email or "@icloud.com" in clean_email):
                 st.error("⚠️ Access restricted. Please enter a valid Gmail (@gmail.com) or iCloud (@icloud.com) address.")
             else:
-                # Extract candidate name automatically from handle
-                handle = clean_email.split("@")[0]
-                extracted_name = handle.replace(".", " ").replace("_", " ").replace("-", " ").title()
-                
+                final_name = custom_candidate_name.strip() if custom_candidate_name.strip() else default_suggested_name
                 st.session_state.student_email = clean_email
-                st.session_state.student_name = extracted_name
+                st.session_state.student_name = final_name if final_name else "Candidate"
                 st.session_state.authenticated = True
                 st.rerun()
-    st.stop()  # Halt execution so non-authenticated users cannot bypass screen
+    st.stop()
 
 
 # --- 2. AUTHENTICATED APP CONTENT ---
 st.sidebar.title("🧬 BioMastery IGCSE")
-st.sidebar.markdown(f"Candidate: **{st.session_state.student_name}**")
-st.sidebar.caption(f"📧 `{st.session_state.student_email}`")
+
+# Editable Name directly in sidebar
+with st.sidebar.expander("👤 Candidate Details", expanded=True):
+    updated_name = st.text_input("Candidate Name:", value=st.session_state.student_name)
+    if updated_name != st.session_state.student_name:
+        st.session_state.student_name = updated_name
+    st.caption(f"📧 `{st.session_state.student_email}`")
 
 if st.sidebar.button("🚪 Sign Out / Switch Account"):
     st.session_state.authenticated = False
