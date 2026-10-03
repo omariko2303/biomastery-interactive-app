@@ -4,7 +4,6 @@ import pandas as pd
 from question_generator import get_high_yield_question, evaluate_written_answer_fast
 from database import init_local_db, log_score, get_leaderboard
 
-# Page Configuration
 st.set_page_config(
     page_title="BioMastery IGCSE | AI Portal",
     page_icon="🧬",
@@ -14,7 +13,7 @@ st.set_page_config(
 
 init_local_db()
 
-# Custom UI Styling
+# Styling
 st.markdown("""
 <style>
     .main-header { font-size: 2.2rem; font-weight: 700; color: #0E7490; margin-bottom: 0.2rem; }
@@ -53,7 +52,7 @@ CAMBRIDGE_SYLLABUS = [
     "21. Human Influences on Ecosystems (Deforestation, Pollution, Conservation)"
 ]
 
-# State Management Initialization
+# Session State Initialization
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 if "student_email" not in st.session_state:
@@ -64,6 +63,8 @@ if "drill_active" not in st.session_state:
     st.session_state.drill_active = False
 if "current_question" not in st.session_state:
     st.session_state.current_question = None
+if "seen_question_ids" not in st.session_state:
+    st.session_state.seen_question_ids = []
 if "question_count" not in st.session_state:
     st.session_state.question_count = 0
 if "correct_count" not in st.session_state:
@@ -74,49 +75,41 @@ if "written_eval" not in st.session_state:
     st.session_state.written_eval = None
 if "question_start_time" not in st.session_state:
     st.session_state.question_start_time = None
-if "session_logs" not in st.session_state:
-    st.session_state.session_logs = []
 if "show_summary" not in st.session_state:
     st.session_state.show_summary = False
 
 
-# ENTRY GATE
+# VERIFICATION GATE
 if not st.session_state.authenticated:
     st.markdown('<div class="main-header" style="text-align: center;">🧬 BioMastery IGCSE</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header" style="text-align: center;">Cambridge High-Yield Diagnostic Engine & Leaderboard</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header" style="text-align: center;">Cambridge High-Yield Diagnostic Engine</div>', unsafe_allow_html=True)
 
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.markdown("### 🔒 Mandatory Student Verification")
-        user_email_input = st.text_input("Enter Email (Gmail or iCloud):", placeholder="e.g. omar@gmail.com")
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        st.markdown("### 🔒 Student Sign-In")
+        email_in = st.text_input("Email:", placeholder="e.g. candidate@gmail.com")
         
-        default_suggested_name = ""
-        if user_email_input and "@" in user_email_input:
-            handle = user_email_input.split("@")[0]
-            default_suggested_name = handle.replace(".", " ").replace("_", " ").replace("-", " ").title()
+        suggested_name = ""
+        if email_in and "@" in email_in:
+            suggested_name = email_in.split("@")[0].replace(".", " ").replace("_", " ").title()
 
-        custom_candidate_name = st.text_input("Official Candidate Name:", value=default_suggested_name)
-        
-        if st.button("🚀 Sign In & Launch Portal", type="primary", use_container_width=True):
-            clean_email = user_email_input.strip().lower()
-            if not clean_email or not ("@gmail.com" in clean_email or "@icloud.com" in clean_email):
-                st.error("⚠️ Access restricted. Please enter a valid Gmail (@gmail.com) or iCloud (@icloud.com) address.")
+        name_in = st.text_input("Candidate Name:", value=suggested_name)
+
+        if st.button("🚀 Launch Portal", type="primary", use_container_width=True):
+            clean_email = email_in.strip().lower()
+            if not clean_email or "@" not in clean_email:
+                st.error("Please enter a valid email address.")
             else:
-                final_name = custom_candidate_name.strip() if custom_candidate_name.strip() else default_suggested_name
                 st.session_state.student_email = clean_email
-                st.session_state.student_name = final_name if final_name else "Candidate"
+                st.session_state.student_name = name_in.strip() if name_in.strip() else "Candidate"
                 st.session_state.authenticated = True
                 st.rerun()
     st.stop()
 
 
-# SIDEBAR NAVIGATION
+# SIDEBAR
 st.sidebar.title("🧬 BioMastery IGCSE")
-with st.sidebar.expander("👤 Candidate Profile", expanded=True):
-    updated_name = st.text_input("Candidate Display Name:", value=st.session_state.student_name)
-    if updated_name != st.session_state.student_name:
-        st.session_state.student_name = updated_name
-    st.caption(f"📧 `{st.session_state.student_email}`")
+st.sidebar.caption(f"👤 **{st.session_state.student_name}** (`{st.session_state.student_email}`)")
 
 if st.sidebar.button("🚪 Sign Out"):
     st.session_state.authenticated = False
@@ -128,62 +121,71 @@ menu = st.sidebar.radio("Navigation", ["🎯 High-Yield Exam Drill", "🏆 Leade
 
 if menu == "🏆 Leaderboard":
     st.header("🏆 Live Cambridge Student Leaderboard")
-    leaderboard_data = get_leaderboard()
-    if leaderboard_data:
-        df_lb = pd.DataFrame(leaderboard_data, columns=["Candidate Name", "Total Marks Scored", "Total Questions Solved", "Accuracy (%)"])
-        df_lb.index = df_lb.index + 1
-        st.dataframe(df_lb, use_container_width=True)
+    lb_data = get_leaderboard()
+    if lb_data:
+        df = pd.DataFrame(lb_data, columns=["Candidate Name", "Total Marks", "Questions Attempted", "Accuracy (%)"])
+        df.index = df.index + 1
+        st.dataframe(df, use_container_width=True)
     else:
-        st.info("No leaderboard entries recorded yet.")
+        st.info("No leaderboard records found.")
 
 elif menu == "🎯 High-Yield Exam Drill":
     st.markdown('<div class="main-header">High-Yield Exam Diagnostic Drill</div>', unsafe_allow_html=True)
 
     if not st.session_state.drill_active and not st.session_state.show_summary:
-        st.subheader("🛠 Configure Exam Session")
-        c1, c2 = st.columns(2)
-        with c1:
-            selected_paper = st.selectbox("Select Paper Focus:", ["Paper 2 (Multiple Choice)", "Paper 4 (Theory & Data Analysis)", "Paper 6 (Alternative to Practical)"])
-        with c2:
-            selected_topic = st.selectbox("Select Cambridge Chapter:", CAMBRIDGE_SYLLABUS)
+        st.subheader("🛠 Session Configuration")
+        col1, col2 = st.columns(2)
+        with col1:
+            sel_paper = st.selectbox("Select Paper Focus:", [
+                "Paper 2 (Multiple Choice)", 
+                "Paper 4 (Theory & Data Analysis)", 
+                "Paper 6 (Alternative to Practical)"
+            ])
+        with col2:
+            sel_topic = st.selectbox("Select Chapter:", CAMBRIDGE_SYLLABUS)
 
-        if st.button("🚀 Launch Diagnostic Session", type="primary"):
-            st.session_state.selected_paper = selected_paper
-            st.session_state.selected_topic = selected_topic
+        if st.button("🚀 Start Drill", type="primary"):
+            st.session_state.selected_paper = sel_paper
+            st.session_state.selected_topic = sel_topic
             st.session_state.drill_active = True
             st.session_state.question_count = 0
             st.session_state.correct_count = 0
+            st.session_state.seen_question_ids = []
             st.session_state.current_question = None
             st.session_state.show_feedback = False
-            st.session_state.session_logs = []
             st.session_state.show_summary = False
             st.rerun()
 
     elif st.session_state.show_summary:
         st.balloons()
-        st.header("📊 Diagnostic Performance Report")
-        total_q = st.session_state.question_count
-        corr_q = st.session_state.correct_count
-        pct = round((corr_q / total_q) * 100, 1) if total_q > 0 else 0.0
+        st.header("📊 Diagnostic Performance Summary")
+        t_q = st.session_state.question_count
+        c_q = st.session_state.correct_count
+        acc = round((c_q / t_q) * 100, 1) if t_q > 0 else 0.0
 
-        col_m1, col_m2, col_m3 = st.columns(3)
-        col_m1.metric("Candidate Name", st.session_state.student_name)
-        col_m2.metric("Final Score", f"{corr_q} / {total_q}")
-        col_m3.metric("Accuracy Percentage", f"{pct}%")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Candidate", st.session_state.student_name)
+        m2.metric("Score", f"{c_q} / {t_q}")
+        m3.metric("Accuracy", f"{acc}%")
 
-        if st.button("Start New Drill"):
+        if st.button("Configure New Drill"):
             st.session_state.drill_active = False
             st.session_state.show_summary = False
             st.session_state.current_question = None
+            st.session_state.seen_question_ids = []
             st.rerun()
 
     else:
-        # Load next question if needed
+        # Load next question if none is active
         if st.session_state.current_question is None:
-            st.session_state.current_question = get_high_yield_question(
-                st.session_state.selected_paper, 
-                st.session_state.selected_topic
+            q_obj = get_high_yield_question(
+                st.session_state.selected_paper,
+                st.session_state.selected_topic,
+                seen_ids=st.session_state.seen_question_ids
             )
+            st.session_state.current_question = q_obj
+            if q_obj.get("id"):
+                st.session_state.seen_question_ids.append(q_obj["id"])
             st.session_state.question_start_time = time.time()
             st.session_state.show_feedback = False
             st.session_state.written_eval = None
@@ -193,43 +195,37 @@ elif menu == "🎯 High-Yield Exam Drill":
         is_mcq = "options" in q
         allowed_sec = q.get("allowed_time_seconds", 60)
 
-        # Calculate time remaining ONLY if not in feedback view
+        # Calculate time remaining
         if not st.session_state.show_feedback:
             elapsed_sec = int(time.time() - st.session_state.question_start_time)
             remaining_sec = max(0, allowed_sec - elapsed_sec)
 
-            # AUTO-ADVANCE WHEN TIMER HITS 0
+            # Timer expired: Auto-advance to next question immediately
             if remaining_sec == 0:
                 st.session_state.question_count += 1
-                st.session_state.session_logs.append({
-                    "question": q['question'],
-                    "is_correct": False,
-                    "matched_keywords": [],
-                    "missing_keywords": q.get("keywords", [])
-                })
                 log_score(
-                    st.session_state.student_email, 
-                    st.session_state.student_name, 
-                    st.session_state.selected_topic, 
+                    st.session_state.student_email,
+                    st.session_state.student_name,
+                    st.session_state.selected_topic,
                     0, 1
                 )
                 st.session_state.current_question = None
-                st.warning("⏱ Time expired! Moving automatically to the next question...")
+                st.warning("⏱ Time expired! Moving to next question automatically...")
                 time.sleep(1)
                 st.rerun()
         else:
             remaining_sec = 0
 
-        # Header bar
-        s1, s2, s3 = st.columns([2, 1, 1])
-        s1.markdown(f"**Candidate:** `{st.session_state.student_name}` | **Q#{st.session_state.question_count + 1}**")
-        s2.markdown(f"**Score:** `{st.session_state.correct_count}/{st.session_state.question_count}`")
-        
+        # Status row
+        r1, r2, r3 = st.columns([2, 1, 1])
+        r1.markdown(f"**Candidate:** `{st.session_state.student_name}` | **Q#{st.session_state.question_count + 1}**")
+        r2.markdown(f"**Score:** `{st.session_state.correct_count}/{st.session_state.question_count}`")
+
         if not st.session_state.show_feedback:
-            badge_class = "timer-badge" if remaining_sec > 10 else "timer-badge-warning"
-            s3.markdown(f'<div class="{badge_class}">⏱ {remaining_sec}s</div>', unsafe_allow_html=True)
+            badge = "timer-badge" if remaining_sec > 10 else "timer-badge-warning"
+            r3.markdown(f'<div class="{badge}">⏱ {remaining_sec}s</div>', unsafe_allow_html=True)
         else:
-            s3.markdown('<div class="timer-badge">✔ Submitted</div>', unsafe_allow_html=True)
+            r3.markdown('<div class="timer-badge">✔ Submitted</div>', unsafe_allow_html=True)
 
         st.write("")
         st.markdown(f"""
@@ -240,75 +236,75 @@ elif menu == "🎯 High-Yield Exam Drill":
         """, unsafe_allow_html=True)
 
         if is_mcq:
-            selected_option = st.radio(
+            sel_opt = st.radio(
                 "Select your option:",
                 options=q["options"],
-                key=f"mcq_opt_{st.session_state.question_count}",
+                key=f"mcq_{q.get('id', st.session_state.question_count)}",
                 disabled=st.session_state.show_feedback
             )
 
             if not st.session_state.show_feedback:
-                c_btn1, c_btn2 = st.columns([2, 1])
-                with c_btn1:
-                    if st.button("Submit MCQ Answer", type="primary"):
+                b_col1, b_col2 = st.columns([2, 1])
+                with b_col1:
+                    if st.button("Submit Answer", type="primary"):
                         st.session_state.show_feedback = True
-                        is_corr = q["options"].index(selected_option) == q["correct_index"]
+                        correct = (q["options"].index(sel_opt) == q["correct_index"])
                         st.session_state.question_count += 1
-                        if is_corr:
+                        if correct:
                             st.session_state.correct_count += 1
-                        
+
                         log_score(
-                            st.session_state.student_email, 
-                            st.session_state.student_name, 
-                            st.session_state.selected_topic, 
-                            1 if is_corr else 0, 1
+                            st.session_state.student_email,
+                            st.session_state.student_name,
+                            st.session_state.selected_topic,
+                            1 if correct else 0, 1
                         )
                         st.rerun()
-                with c_btn2:
+                with b_col2:
                     if st.button("🏁 End Session"):
                         st.session_state.drill_active = False
                         st.session_state.show_summary = True
                         st.rerun()
 
             else:
-                is_corr = q["options"].index(selected_option) == q["correct_index"]
-                if is_corr:
+                correct = (q["options"].index(sel_opt) == q["correct_index"])
+                if correct:
                     st.markdown(f'<div class="examiner-box-success"><h4>✅ Correct (+1 Mark)</h4><p>{q.get("examiner_note", "")}</p></div>', unsafe_allow_html=True)
                 else:
                     st.markdown(f'<div class="examiner-box-error"><h4>❌ Incorrect</h4><p><b>Correct Answer:</b> {q["options"][q["correct_index"]]}</p></div>', unsafe_allow_html=True)
 
         else:
-            user_text_response = st.text_area(
+            written_input = st.text_area(
                 "Write your answer below (use precise Cambridge scientific terminology):",
-                key=f"written_opt_{st.session_state.question_count}",
+                key=f"written_{q.get('id', st.session_state.question_count)}",
                 disabled=st.session_state.show_feedback,
                 height=130
             )
 
             if not st.session_state.show_feedback:
-                c_btn1, c_btn2 = st.columns([2, 1])
-                with c_btn1:
-                    if st.button("Submit Written Answer", type="primary"):
-                        if not user_text_response.strip():
-                            st.warning("Please enter an answer before submitting.")
+                b_col1, b_col2 = st.columns([2, 1])
+                with b_col1:
+                    if st.button("Submit Written Answer for AI Examiner Review", type="primary"):
+                        if not written_input.strip():
+                            st.warning("Please type an answer before submitting.")
                         else:
-                            # Instant evaluation without API wait times
-                            eval_result = evaluate_written_answer_fast(q, user_text_response)
-                            st.session_state.written_eval = eval_result
+                            # Instant evaluation
+                            res = evaluate_written_answer_fast(q, written_input)
+                            st.session_state.written_eval = res
                             st.session_state.show_feedback = True
                             st.session_state.question_count += 1
-                            score_awarded = eval_result.get("score_awarded", 0)
-                            if score_awarded > 0:
+                            awarded = res.get("score_awarded", 0)
+                            if awarded > 0:
                                 st.session_state.correct_count += 1
-                            
+
                             log_score(
-                                st.session_state.student_email, 
-                                st.session_state.student_name, 
-                                st.session_state.selected_topic, 
-                                score_awarded, 1
+                                st.session_state.student_email,
+                                st.session_state.student_name,
+                                st.session_state.selected_topic,
+                                awarded, 1
                             )
                             st.rerun()
-                with c_btn2:
+                with b_col2:
                     if st.button("🏁 End Session"):
                         st.session_state.drill_active = False
                         st.session_state.show_summary = True
@@ -316,39 +312,39 @@ elif menu == "🎯 High-Yield Exam Drill":
 
             else:
                 eval_res = st.session_state.written_eval or {}
-                score = eval_res.get("score_awarded", 0)
-                
-                if score > 0:
-                    st.markdown(f'<div class="examiner-box-success"><h4>✅ {score} Mark(s) Awarded</h4><p>{eval_res.get("examiner_feedback")}</p></div>', unsafe_allow_html=True)
+                sc = eval_res.get("score_awarded", 0)
+
+                if sc > 0:
+                    st.markdown(f'<div class="examiner-box-success"><h4>✅ {sc} Mark(s) Awarded</h4><p>{eval_res.get("examiner_feedback")}</p></div>', unsafe_allow_html=True)
                 else:
-                    st.markdown(f'<div class="examiner-box-error"><h4>⚠️️ 0 Marks Awarded</h4><p>{eval_res.get("examiner_feedback")}</p></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="examiner-box-error"><h4>⚠️ 0 Marks Awarded</h4><p>{eval_res.get("examiner_feedback")}</p></div>', unsafe_allow_html=True)
 
                 st.markdown(f"**Ideal Model Answer:**\n> {q.get('model_answer', 'N/A')}")
-                
+
                 matched = eval_res.get("matched_keywords", [])
                 missing = eval_res.get("missing_keywords", [])
-                
+
                 st.markdown("##### 🔑 Keyword Checklist:")
-                html_kw = "".join([f'<span class="keyword-pill-matched">✓ {kw}</span>' for kw in matched])
-                html_kw += "".join([f'<span class="keyword-pill-missing">✗ {kw}</span>' for kw in missing])
-                st.markdown(html_kw, unsafe_allow_html=True)
+                pills = "".join([f'<span class="keyword-pill-matched">✓ {k}</span>' for k in matched])
+                pills += "".join([f'<span class="keyword-pill-missing">✗ {k}</span>' for k in missing])
+                st.markdown(pills, unsafe_allow_html=True)
 
         if st.session_state.show_feedback:
             st.write("")
-            b1, b2 = st.columns([2, 1])
-            with b1:
+            nb1, nb2 = st.columns([2, 1])
+            with nb1:
                 if st.button("Next Question ➔", type="primary"):
                     st.session_state.current_question = None
                     st.session_state.show_feedback = False
                     st.session_state.written_eval = None
                     st.rerun()
-            with b2:
+            with nb2:
                 if st.button("🏁 End Session"):
                     st.session_state.drill_active = False
                     st.session_state.show_summary = True
                     st.rerun()
 
-        # Trigger client auto-refresh every 1 second while question is active
+        # Refresh page every second while answering to update the timer
         if not st.session_state.show_feedback:
             time.sleep(1)
             st.rerun()
