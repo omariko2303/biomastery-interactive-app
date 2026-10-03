@@ -1,7 +1,7 @@
 import streamlit as st
 import time
 import pandas as pd
-from question_generator import generate_single_question, evaluate_written_answer
+from question_generator import get_high_yield_question, evaluate_written_answer
 from database import init_local_db, log_score, get_leaderboard
 
 # Page Configuration
@@ -19,7 +19,6 @@ st.markdown("""
 <style>
     .main-header { font-size: 2.2rem; font-weight: 700; color: #0E7490; margin-bottom: 0.2rem; }
     .sub-header { font-size: 1.05rem; color: #475569; margin-bottom: 1.5rem; }
-    .login-card { background-color: #FFFFFF; border-radius: 12px; padding: 30px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); border-top: 5px solid #0284C7; max-width: 550px; margin: 40px auto; }
     .question-box { background-color: #FFFFFF; border-left: 5px solid #0284C7; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px; }
     .examiner-box-success { background-color: #F0FDF4; border: 1px solid #BBF7D0; border-left: 5px solid #16A34A; padding: 15px; border-radius: 8px; margin-top: 15px; }
     .examiner-box-error { background-color: #FEF2F2; border: 1px solid #FECACA; border-left: 5px solid #DC2626; padding: 15px; border-radius: 8px; margin-top: 15px; }
@@ -97,12 +96,12 @@ if "show_summary" not in st.session_state:
 # --- 1. OBLIGATORY ENTRY GATE (GMAIL / ICLOUD) ---
 if not st.session_state.authenticated:
     st.markdown('<div class="main-header" style="text-align: center;">🧬 BioMastery IGCSE</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header" style="text-align: center;">Cambridge AI Engine & Live Performance Tracking</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header" style="text-align: center;">Cambridge High-Yield Diagnostic Engine & Leaderboard</div>', unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("### 🔒 Mandatory Student Verification")
-        st.caption("Please sign in with your official Gmail or iCloud address.")
+        st.caption("Please enter your Gmail or iCloud address to unlock high-yield drills and track your leaderboard ranking.")
 
         user_email_input = st.text_input("Enter Email (Gmail or iCloud):", placeholder="e.g. omar@gmail.com")
         
@@ -112,14 +111,14 @@ if not st.session_state.authenticated:
             handle = user_email_input.split("@")[0]
             default_suggested_name = handle.replace(".", " ").replace("_", " ").replace("-", " ").title()
 
-        # Allow user to edit their official name explicitly
+        # Allow user to edit candidate display name
         custom_candidate_name = st.text_input(
-            "Official Candidate Name (for Leaderboard & Reports):", 
+            "Official Candidate Name (Editable):", 
             value=default_suggested_name, 
             placeholder="e.g. Omar Mohamed"
         )
         
-        if st.button("🚀 Sign In & Continue", type="primary", use_container_width=True):
+        if st.button("🚀 Sign In & Launch Portal", type="primary", use_container_width=True):
             clean_email = user_email_input.strip().lower()
             
             if not clean_email or not ("@gmail.com" in clean_email or "@icloud.com" in clean_email):
@@ -136,9 +135,9 @@ if not st.session_state.authenticated:
 # --- 2. AUTHENTICATED APP CONTENT ---
 st.sidebar.title("🧬 BioMastery IGCSE")
 
-# Editable Name directly in sidebar
-with st.sidebar.expander("👤 Candidate Details", expanded=True):
-    updated_name = st.text_input("Candidate Name:", value=st.session_state.student_name)
+# Dynamic Candidate Profile Card in Sidebar
+with st.sidebar.expander("👤 Candidate Profile", expanded=True):
+    updated_name = st.text_input("Candidate Display Name:", value=st.session_state.student_name)
     if updated_name != st.session_state.student_name:
         st.session_state.student_name = updated_name
     st.caption(f"📧 `{st.session_state.student_email}`")
@@ -151,12 +150,12 @@ if st.sidebar.button("🚪 Sign Out / Switch Account"):
     st.rerun()
 
 st.sidebar.divider()
-menu = st.sidebar.radio("Navigation", ["🎯 Infinite Practice Mode", "🏆 Leaderboard"])
+menu = st.sidebar.radio("Navigation", ["🎯 High-Yield Exam Drill", "🏆 Leaderboard"])
 
 # LEADERBOARD VIEW
 if menu == "🏆 Leaderboard":
     st.header("🏆 Live Cambridge Student Leaderboard")
-    st.caption("Rankings update automatically based on total marks scored across all drill sessions.")
+    st.caption("Rankings update automatically based on total verified marks scored across all drill sessions.")
     
     leaderboard_data = get_leaderboard()
     if leaderboard_data:
@@ -164,11 +163,11 @@ if menu == "🏆 Leaderboard":
         df_lb.index = df_lb.index + 1
         st.dataframe(df_lb, use_container_width=True)
     else:
-        st.info("No leaderboard entries recorded yet. Be the first to launch a session!")
+        st.info("No leaderboard entries recorded yet. Be the first to launch a session and log a score!")
 
 # PRACTICE DRILL VIEW
-elif menu == "🎯 Infinite Practice Mode":
-    st.markdown('<div class="main-header">Infinite AI Diagnostic Drill</div>', unsafe_allow_html=True)
+elif menu == "🎯 High-Yield Exam Drill":
+    st.markdown('<div class="main-header">High-Yield Exam Diagnostic Drill</div>', unsafe_allow_html=True)
 
     keys_pool = st.secrets.get("GEMINI_API_KEYS", st.secrets.get("GEMINI_API_KEY", ""))
 
@@ -242,22 +241,23 @@ elif menu == "🎯 Infinite Practice Mode":
 
     else:
         if st.session_state.current_question is None:
-            with st.spinner("🤖 Gemini is generating question & setting timer..."):
+            with st.spinner("📦 Loading authentic high-yield exam question & mark scheme..."):
                 try:
-                    q_data = generate_single_question(keys_pool, st.session_state.selected_paper, st.session_state.selected_topic)
+                    # Fetches 100% verified question from high-yield question bank
+                    q_data = get_high_yield_question(st.session_state.selected_paper, st.session_state.selected_topic)
                     st.session_state.current_question = q_data
                     st.session_state.question_start_time = time.time()
                     st.session_state.show_feedback = False
                     st.session_state.written_eval = None
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Generation error: {e}")
+                    st.error(f"Error loading question: {e}")
                     if st.button("Retry"):
                         st.rerun()
                     st.stop()
 
         q = st.session_state.current_question
-        is_mcq = q.get("question_format") == "MULTIPLE_CHOICE"
+        is_mcq = "options" in q
         allowed_sec = q.get("allowed_time_seconds", 60)
         elapsed_sec = int(time.time() - st.session_state.question_start_time)
         remaining_sec = max(0, allowed_sec - elapsed_sec)
@@ -268,7 +268,7 @@ elif menu == "🎯 Infinite Practice Mode":
         s1, s2, s3, s4 = st.columns([1.5, 1, 1, 1])
         s1.markdown(f"**Candidate:** `{st.session_state.student_name}` | **Q#{st.session_state.question_count + 1}**")
         s2.markdown(f"**Score:** `{st.session_state.correct_count}/{st.session_state.question_count}`")
-        s3.markdown(f'<span class="ai-badge">AI Timer: {allowed_sec}s</span>', unsafe_allow_html=True)
+        s3.markdown(f'<span class="ai-badge">Timer: {allowed_sec}s</span>', unsafe_allow_html=True)
         
         if remaining_sec > 10:
             s4.markdown(f'<div class="timer-badge">⏱ {remaining_sec}s</div>', unsafe_allow_html=True)
@@ -279,7 +279,7 @@ elif menu == "🎯 Infinite Practice Mode":
 
         st.markdown(f"""
         <div class="question-box">
-            <span style="color:#0284C7; font-weight:bold; font-size:0.9rem;">[{q.get('syllabus_code', '0610')}] — {q.get('command_word', 'Question')}</span>
+            <span style="color:#0284C7; font-weight:bold; font-size:0.9rem;">[0610 Cambridge IGCSE] — {st.session_state.selected_paper}</span>
             <h4 style="margin-top:8px; color:#1E293B;">{q['question']}</h4>
         </div>
         """, unsafe_allow_html=True)
@@ -305,8 +305,8 @@ elif menu == "🎯 Infinite Practice Mode":
                         st.session_state.session_logs.append({
                             "question": q['question'],
                             "is_correct": is_corr,
-                            "matched_keywords": q.get("keywords", []) if is_corr else [],
-                            "missing_keywords": [] if is_corr else q.get("keywords", [])
+                            "matched_keywords": [],
+                            "missing_keywords": []
                         })
                         
                         log_score(
@@ -327,9 +327,9 @@ elif menu == "🎯 Infinite Practice Mode":
             else:
                 is_corr = q["options"].index(selected_option) == q["correct_index"]
                 if is_corr:
-                    st.markdown(f'<div class="examiner-box-success"><h4>✅ Correct (+1 Mark)</h4><p>{q["examiner_note"]}</p></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="examiner-box-success"><h4>✅ Correct (+1 Mark)</h4><p>{q.get("examiner_note", "Excellent accuracy!")}</p></div>', unsafe_allow_html=True)
                 else:
-                    st.markdown(f'<div class="examiner-box-error"><h4>❌ Incorrect Option</h4><p><b>Correct Answer:</b> {q["options"][q["correct_index"]]}</p><p>{q["examiner_note"]}</p></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="examiner-box-error"><h4>❌ Incorrect Option</h4><p><b>Correct Answer:</b> {q["options"][q["correct_index"]]}</p><p>{q.get("examiner_note", "")}</p></div>', unsafe_allow_html=True)
 
         else:
             user_text_response = st.text_area(
@@ -410,4 +410,3 @@ elif menu == "🎯 Infinite Practice Mode":
                     st.session_state.drill_active = False
                     st.session_state.show_summary = True
                     st.rerun()
-                
